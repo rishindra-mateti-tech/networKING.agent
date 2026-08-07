@@ -1,0 +1,28 @@
+# Python
+backend/.venv/
+backend/__pycache__/
+**/__pycache__/
+*.pyc
+
+# Secrets
+backend/.env
+.env
+
+# Database
+*.db
+*.db-journal
+
+# Uploads (user-generated content, not source)
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/npm-debug.log*
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
