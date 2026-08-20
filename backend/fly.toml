@@ -1,0 +1,31 @@
+# Fly.io app config for the networKING.agent backend.
+#
+# IMPORTANT: this app must stay on exactly 1 machine. The QueueOrchestrator's
+# worker pool and in-memory locks/triggers live inside a single process --
+# scaling to 2+ machines would run duplicate, uncoordinated worker pools
+# against the same database. min_machines_running / auto_stop_machines below
+# are set to keep it pinned at one always-on instance.
+
+app = "networking-agent-api"  # change this if the name is already taken
+primary_region = "iad"        # pick the region closest to you
+
+[build]
+
+[env]
+  PORT = "8080"
+
+[[mounts]]
+  source = "networking_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

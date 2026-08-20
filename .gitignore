@@ -11,6 +11,8 @@ backend/.env
 # Database
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
 
 # Uploads (user-generated content, not source)
 backend/uploads/*

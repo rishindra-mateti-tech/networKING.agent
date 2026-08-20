@@ -19,7 +19,7 @@ I'm Rishindra, an MS Computer Science student at Wright State University, buildi
 - **Multi-agent pipeline, not one big prompt.** Profile Intelligence → Company Intelligence → Relationship Strategy → Personalization → Context Synthesis → Message Writing are separate agents with separate responsibilities, so the model writing the message is working from a structured brief instead of guessing.
 - **Async worker orchestrator.** A `QueueOrchestrator` dynamically spins up a pool of background workers sized to how many Gemini API keys I have active, pulls from a pending queue, and handles rate-limit cooldown + automatic failover to standby keys without dropping a task.
 - **Security-conscious by default.** JWT signing secrets and API-key encryption keys are generated per-install (never hardcoded in source), and stored Gemini API keys are encrypted at rest, not plaintext.
-- **Full-stack**: FastAPI + SQLAlchemy backend, Next.js/React dashboard, JWT auth, Telegram notifications for when a draft's ready, PDF parsing for LinkedIn exports.
+- **Full-stack**: FastAPI + SQLAlchemy backend, Next.js/React dashboard, JWT auth, Telegram and Slack notifications for when a draft's ready, PDF parsing for LinkedIn exports.
 
 ## Tech stack
 
@@ -30,7 +30,7 @@ I'm Rishindra, an MS Computer Science student at Wright State University, buildi
 | Auth | JWT (`python-jose`), bcrypt password hashing |
 | Security | Fernet (AES) encryption at rest for API keys, per-install generated secrets |
 | Frontend | Next.js, React, Tailwind |
-| Ops | Async task orchestration with key-pool failover, Telegram bot notifications |
+| Ops | Async task orchestration with key-pool failover, Telegram bot + Slack webhook notifications |
 
 ## Running it locally
 
@@ -41,6 +41,8 @@ python run.py
 This bootstraps a virtualenv, installs backend + frontend dependencies, and starts FastAPI on `:8000` and Next.js on `:3000`. On first run it auto-generates the JWT/encryption secrets into a local `.env` file (see `backend/.env.example`); nothing sensitive ships in this repo.
 
 You'll need your own Gemini API key (free tier from [Google AI Studio](https://aistudio.google.com/apikey)), added from the app's "API Key Workers" screen after you sign up.
+
+Deploying this somewhere real (Fly.io + Vercel): see [DEPLOY.md](DEPLOY.md).
 
 ***
 

@@ -175,6 +175,23 @@ class QueueOrchestrator:
         except Exception as e:
             print(f"[ORCHESTRATOR] Failed to send Telegram alert: {e}")
 
+    async def _send_slack_alert(self, webhook_url: str, text: str):
+        """Dispatches an asynchronous Slack notification via an Incoming Webhook."""
+        webhook_url = webhook_url.strip() if webhook_url else ""
+        if not webhook_url:
+            return
+
+        payload = {"text": text}
+        try:
+            async with httpx.AsyncClient() as client:
+                res = await client.post(webhook_url, json=payload, timeout=10.0)
+                if res.status_code == 200:
+                    print(f"[ORCHESTRATOR] Slack notification sent successfully.")
+                else:
+                    print(f"[ORCHESTRATOR] Slack API error ({res.status_code}): {res.text}")
+        except Exception as e:
+            print(f"[ORCHESTRATOR] Failed to send Slack alert: {e}")
+
     async def _interruptible_sleep(self, user_id: int, seconds: float):
         """
         Sleeps for the given duration but can be interrupted immediately
@@ -252,7 +269,8 @@ class QueueOrchestrator:
 
                 telegram_token = settings.get("telegram_token")
                 telegram_chat_id = settings.get("telegram_chat_id")
-                
+                slack_webhook_url = settings.get("slack_webhook_url")
+
                 # Default pacing is 15 minutes, but user can change it
                 try:
                     pacing_min = float(settings.get("pacing_interval_minutes", 15.0))
@@ -343,73 +361,128 @@ class QueueOrchestrator:
                         success = True
                         print(f"[WORKER] {worker_name} successfully finished generation for {connection.name}.")
                         
-                        # Send Telegram Notification
-                        if telegram_token and telegram_chat_id:
+                        # Build shared notification content (used by both Telegram and Slack)
+                        if (telegram_token and telegram_chat_id) or slack_webhook_url:
                             import json as j
-                            safe_name = html.escape(connection.name or "Candidate")
-                            safe_title = html.escape(connection.current_title or "Software Professional")
-                            safe_company = html.escape(connection.company or "Company")
-                            
+
                             try:
                                 company_intel = j.loads(bridge_data.get("company_intelligence") or "{}")
                             except Exception:
                                 company_intel = {}
-                                
-                            company_class = html.escape(company_intel.get("company_type") or "Startup")
-                            
-                            profile_url_block = ""
-                            if connection.profile_url:
-                                profile_url_block = f"🔗 <b>LinkedIn URL</b>: {html.escape(connection.profile_url)}\n"
-                                
+
+                            raw_name = connection.name or "Candidate"
+                            raw_title = connection.current_title or "Software Professional"
+                            raw_company = connection.company or "Company"
+                            raw_company_class = company_intel.get("company_type") or "Startup"
+
                             networking_score = f"{connection.networking_score or 5.0}"
                             reply_probability = f"{int(connection.reply_probability or 50)}"
-                            
-                            # Determine hiring display
+
                             hiring_val = connection.hiring_badge_status or company_intel.get("hiring_status") or connection.hiring_probability_score or "unknown"
-                            hiring_probability = html.escape(str(hiring_val).capitalize())
-                            
-                            is_decision_maker = html.escape((connection.is_decision_maker or "no").capitalize())
-                            referral_potential = html.escape((connection.referral_potential or "medium").capitalize())
-                            networking_difficulty = html.escape((connection.networking_difficulty or "medium").replace('_', ' ').capitalize())
-                            
-                            conversation_starter = html.escape(connection.conversation_starter or "None")
-                            avoid_points = html.escape(connection.avoid_points or "None")
-                            best_message_type = html.escape(connection.best_message_type or "Technical curiosity")
-                            
-                            safe_referral = html.escape(connection.generated_outreach_referral or "")
-                            safe_coffee = html.escape(connection.generated_outreach_coffee or "")
-                            safe_technical = html.escape(connection.generated_outreach_technical or "")
-                            safe_relationship = html.escape(connection.generated_outreach_relationship or "")
-                            safe_featured = html.escape(connection.generated_outreach_featured or "")
-                            
-                            text = (
-                                f"✨ <b>Outreach Intelligence Ready for {safe_name}!</b>\n"
-                                f"💼 <b>Role</b>: {safe_title} @ {safe_company}\n"
-                                f"🏢 <b>Classification</b>: {company_class}\n"
-                                f"{profile_url_block}\n"
-                                f"🌟 <b>Networking Score</b>: {networking_score}/10\n"
-                                f"📈 <b>Reply Probability</b>: {reply_probability}%\n"
-                                f"💼 <b>Hiring Probability</b>: {hiring_probability}\n"
-                                f"🔑 <b>Decision Maker</b>: {is_decision_maker}\n"
-                                f"🤝 <b>Referral Potential</b>: {referral_potential}\n"
-                                f"🧗 <b>Networking Difficulty</b>: {networking_difficulty}\n\n"
-                                f"💡 <b>Conversation Starter</b>: {conversation_starter}\n"
-                                f"⚠️ <b>Avoid</b>: {avoid_points}\n"
-                                f"🎯 <b>Best Message Type</b>: {best_message_type}\n\n"
-                                f"----------------------------\n"
-                                f"📝 <b>REFERRAL DRAFT</b>\n<code>{safe_referral}</code>\n\n"
-                                f"----------------------------\n"
-                                f"📝 <b>COFFEE CHAT DRAFT</b>\n<code>{safe_coffee}</code>\n\n"
-                                f"----------------------------\n"
-                                f"📝 <b>TECHNICAL DRAFT</b>\n<code>{safe_technical}</code>\n\n"
-                                f"----------------------------\n"
-                                f"📝 <b>RELATIONSHIP BUILDING DRAFT</b>\n<code>{safe_relationship}</code>\n\n"
-                                f"----------------------------\n"
-                                f"📝 <b>FEATURED OUTREACH DRAFT (No Limit)</b>\n<code>{safe_featured}</code>\n\n"
-                                f"----------------------------\n"
-                                f"<i>Review, select & copy from your networKING dashboard.</i>"
-                            )
-                            await self._send_telegram_alert(telegram_token, telegram_chat_id, text)
+                            raw_hiring_probability = str(hiring_val).capitalize()
+
+                            raw_is_decision_maker = (connection.is_decision_maker or "no").capitalize()
+                            raw_referral_potential = (connection.referral_potential or "medium").capitalize()
+                            raw_networking_difficulty = (connection.networking_difficulty or "medium").replace('_', ' ').capitalize()
+
+                            raw_conversation_starter = connection.conversation_starter or "None"
+                            raw_avoid_points = connection.avoid_points or "None"
+                            raw_best_message_type = connection.best_message_type or "Technical curiosity"
+
+                            raw_referral = connection.generated_outreach_referral or ""
+                            raw_coffee = connection.generated_outreach_coffee or ""
+                            raw_technical = connection.generated_outreach_technical or ""
+                            raw_relationship = connection.generated_outreach_relationship or ""
+                            raw_featured = connection.generated_outreach_featured or ""
+
+                            # --- Telegram (HTML parse_mode) ---
+                            if telegram_token and telegram_chat_id:
+                                safe_name = html.escape(raw_name)
+                                safe_title = html.escape(raw_title)
+                                safe_company = html.escape(raw_company)
+                                company_class = html.escape(raw_company_class)
+                                profile_url_block = ""
+                                if connection.profile_url:
+                                    profile_url_block = f"🔗 <b>LinkedIn URL</b>: {html.escape(connection.profile_url)}\n"
+                                hiring_probability = html.escape(raw_hiring_probability)
+                                is_decision_maker = html.escape(raw_is_decision_maker)
+                                referral_potential = html.escape(raw_referral_potential)
+                                networking_difficulty = html.escape(raw_networking_difficulty)
+                                conversation_starter = html.escape(raw_conversation_starter)
+                                avoid_points = html.escape(raw_avoid_points)
+                                best_message_type = html.escape(raw_best_message_type)
+                                safe_referral = html.escape(raw_referral)
+                                safe_coffee = html.escape(raw_coffee)
+                                safe_technical = html.escape(raw_technical)
+                                safe_relationship = html.escape(raw_relationship)
+                                safe_featured = html.escape(raw_featured)
+
+                                telegram_text = (
+                                    f"✨ <b>Outreach Intelligence Ready for {safe_name}!</b>\n"
+                                    f"💼 <b>Role</b>: {safe_title} @ {safe_company}\n"
+                                    f"🏢 <b>Classification</b>: {company_class}\n"
+                                    f"{profile_url_block}\n"
+                                    f"🌟 <b>Networking Score</b>: {networking_score}/10\n"
+                                    f"📈 <b>Reply Probability</b>: {reply_probability}%\n"
+                                    f"💼 <b>Hiring Probability</b>: {hiring_probability}\n"
+                                    f"🔑 <b>Decision Maker</b>: {is_decision_maker}\n"
+                                    f"🤝 <b>Referral Potential</b>: {referral_potential}\n"
+                                    f"🧗 <b>Networking Difficulty</b>: {networking_difficulty}\n\n"
+                                    f"💡 <b>Conversation Starter</b>: {conversation_starter}\n"
+                                    f"⚠️ <b>Avoid</b>: {avoid_points}\n"
+                                    f"🎯 <b>Best Message Type</b>: {best_message_type}\n\n"
+                                    f"----------------------------\n"
+                                    f"📝 <b>REFERRAL DRAFT</b>\n<code>{safe_referral}</code>\n\n"
+                                    f"----------------------------\n"
+                                    f"📝 <b>COFFEE CHAT DRAFT</b>\n<code>{safe_coffee}</code>\n\n"
+                                    f"----------------------------\n"
+                                    f"📝 <b>TECHNICAL DRAFT</b>\n<code>{safe_technical}</code>\n\n"
+                                    f"----------------------------\n"
+                                    f"📝 <b>RELATIONSHIP BUILDING DRAFT</b>\n<code>{safe_relationship}</code>\n\n"
+                                    f"----------------------------\n"
+                                    f"📝 <b>FEATURED OUTREACH DRAFT (No Limit)</b>\n<code>{safe_featured}</code>\n\n"
+                                    f"----------------------------\n"
+                                    f"<i>Review, select & copy from your networKING dashboard.</i>"
+                                )
+                                await self._send_telegram_alert(telegram_token, telegram_chat_id, telegram_text)
+
+                            # --- Slack (mrkdwn) ---
+                            if slack_webhook_url:
+                                def _slack_escape(s: str) -> str:
+                                    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+                                profile_url_line = ""
+                                if connection.profile_url:
+                                    profile_url_line = f"🔗 *LinkedIn URL*: {_slack_escape(connection.profile_url)}\n"
+
+                                slack_text = (
+                                    f"✨ *Outreach Intelligence Ready for {_slack_escape(raw_name)}!*\n"
+                                    f"💼 *Role*: {_slack_escape(raw_title)} @ {_slack_escape(raw_company)}\n"
+                                    f"🏢 *Classification*: {_slack_escape(raw_company_class)}\n"
+                                    f"{profile_url_line}\n"
+                                    f"🌟 *Networking Score*: {networking_score}/10\n"
+                                    f"📈 *Reply Probability*: {reply_probability}%\n"
+                                    f"💼 *Hiring Probability*: {_slack_escape(raw_hiring_probability)}\n"
+                                    f"🔑 *Decision Maker*: {_slack_escape(raw_is_decision_maker)}\n"
+                                    f"🤝 *Referral Potential*: {_slack_escape(raw_referral_potential)}\n"
+                                    f"🧗 *Networking Difficulty*: {_slack_escape(raw_networking_difficulty)}\n\n"
+                                    f"💡 *Conversation Starter*: {_slack_escape(raw_conversation_starter)}\n"
+                                    f"⚠️ *Avoid*: {_slack_escape(raw_avoid_points)}\n"
+                                    f"🎯 *Best Message Type*: {_slack_escape(raw_best_message_type)}\n\n"
+                                    f"----------------------------\n"
+                                    f"📝 *REFERRAL DRAFT*\n```{_slack_escape(raw_referral)}```\n"
+                                    f"----------------------------\n"
+                                    f"📝 *COFFEE CHAT DRAFT*\n```{_slack_escape(raw_coffee)}```\n"
+                                    f"----------------------------\n"
+                                    f"📝 *TECHNICAL DRAFT*\n```{_slack_escape(raw_technical)}```\n"
+                                    f"----------------------------\n"
+                                    f"📝 *RELATIONSHIP BUILDING DRAFT*\n```{_slack_escape(raw_relationship)}```\n"
+                                    f"----------------------------\n"
+                                    f"📝 *FEATURED OUTREACH DRAFT (No Limit)*\n```{_slack_escape(raw_featured)}```\n"
+                                    f"----------------------------\n"
+                                    f"_Review, select & copy from your networKING dashboard._"
+                                )
+                                await self._send_slack_alert(slack_webhook_url, slack_text)
 
 
                     except Exception as e:
@@ -424,7 +497,9 @@ class QueueOrchestrator:
                         if telegram_token and telegram_chat_id:
                             alert_msg = f"⚠️ <b>Key Cooldown alert:</b> API key '{current_key_record.label}' encountered an error and was placed in cooldown for 3 minutes."
                             await self._send_telegram_alert(telegram_token, telegram_chat_id, alert_msg)
-                        
+                        if slack_webhook_url:
+                            await self._send_slack_alert(slack_webhook_url, f"⚠️ *Key Cooldown alert:* API key '{current_key_record.label}' encountered an error and was placed in cooldown for 3 minutes.")
+
                         # Attempt to failover to a standby key
                         fallback_key = self._get_backup_key(db, user_id)
                         if fallback_key:
@@ -433,6 +508,8 @@ class QueueOrchestrator:
                             if telegram_token and telegram_chat_id:
                                 alert_msg = f"🔄 <b>Failover active:</b> Swapped to standby key '{fallback_key.label}'."
                                 await self._send_telegram_alert(telegram_token, telegram_chat_id, alert_msg)
+                            if slack_webhook_url:
+                                await self._send_slack_alert(slack_webhook_url, f"🔄 *Failover active:* Swapped to standby key '{fallback_key.label}'.")
                         else:
                             # No standby key found, exit attempt loop
                             break

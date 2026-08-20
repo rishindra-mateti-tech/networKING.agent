@@ -21,8 +21,19 @@ def _encrypt_existing_api_keys(cursor):
             print(f"[MIGRATE] Encrypted plaintext API key id={key_id} at rest.")
 
 
+def _resolve_db_path() -> str:
+    """Mirrors database.py's DATABASE_URL resolution so migrations hit the same file."""
+    database_url = os.getenv("DATABASE_URL", "")
+    if database_url.startswith("sqlite:///"):
+        raw_path = database_url[len("sqlite:///"):]
+        if raw_path.startswith("./"):
+            return os.path.join(os.path.dirname(__file__), raw_path[2:])
+        return raw_path
+    return os.path.join(os.path.dirname(__file__), "networking.db")
+
+
 def run_migrations():
-    db_path = os.path.join(os.path.dirname(__file__), "networking.db")
+    db_path = _resolve_db_path()
     print(f"Running database migrations on: {db_path}")
     
     if not os.path.exists(db_path):

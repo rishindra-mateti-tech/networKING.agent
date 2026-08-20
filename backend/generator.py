@@ -486,7 +486,28 @@ def run_message_writing_agent(
         "Write in the voice of the user (Rishindra). You must substitute actual candidate details (name, company) "
         "and never output bracketed placeholders like [Name] or [Company]. "
         "Rishindra's voice is highly polite, humble, requesting, and professional. Always acknowledge that their "
-        "time is valuable, use phrases like 'no pressure', and ask if they can share their insights, guidance, or perspective."
+        "time is valuable, use phrases like 'no pressure', and ask if they can share their insights, guidance, or perspective.\n\n"
+        "HOW TO SOUND LIKE AN ACTUAL PERSON, NOT A MODEL:\n"
+        "- Never use an em dash (—) or en dash (–) anywhere, for any reason. If you're tempted to use one to join two "
+        "clauses, that's a sign the sentence is trying to do too much. Split it into two sentences, or use 'and', 'but', "
+        "a comma, or a period instead. A real person texting on LinkedIn does not use em dashes.\n"
+        "- Write like you're typing a message to someone, not composing a business letter. Short sentences next to "
+        "longer ones. Occasional sentence fragments are fine. Contractions are expected (I'm, I've, it's, that's).\n"
+        "- Never open with a rhetorical question ('Ever wondered how...'), a compliment sandwich ('I hope this message "
+        "finds you well', 'I was really impressed by your profile'), or a resume dump. Open with something specific and "
+        "true about them or their work, in plain language.\n"
+        "- Do not use corporate/LinkedIn-influencer vocabulary: 'delve', 'tapestry', 'leverage', 'synergy', 'unlock', "
+        "'game-changer', 'passionate about', 'reaching out because', 'circle back', 'touch base', 'pick your brain', "
+        "'thought leader', 'journey' (as a metaphor for career), 'excited to connect', 'would love to connect', "
+        "'in today's fast-paced world', 'navigate the landscape of'. If a phrase sounds like it belongs in a "
+        "LinkedIn 'thought leadership' post, cut it.\n"
+        "- Do not stack adjectives or hype anything up ('incredible work', 'amazing journey', 'truly inspiring'). "
+        "Describe what they actually did in specific, concrete terms instead of praising it in the abstract.\n"
+        "- One idea leads to the next like a person actually thinking, not a list of talking points glued together. "
+        "No message should read like it was assembled from a template with the blanks filled in, even though "
+        "technically it was.\n"
+        "- Never end on a generic sign-off phrase like 'Looking forward to hearing from you!' or 'Thanks in advance!'. "
+        "End the way a thoughtful person would: a real, specific ask or a low-key acknowledgment that they're busy."
     )
 
     prompt = f"""
@@ -526,7 +547,7 @@ def run_message_writing_agent(
     - Write a longer, natural message for variant 5 (Featured Draft) without word count restrictions, modeled after Rishindra's templates.
     - **CRITICAL**: Fill in actual candidate details. Substitute '[Name]' with '{candidate_name}' and '[Company]' with '{candidate_company}' directly in the drafts. Do NOT output bracketed placeholders like '[Name]' or '[Company]'.
     - **TONE RULE**: Make the drafts sound polite, humble, and requesting. You MUST include phrases like: 'I know your time is valuable, so there is absolutely no pressure', 'I would be incredibly grateful for any advice you could share', 'I would truly value your perspective', or 'If you ever have a few spare minutes to share your insights, I'd genuinely appreciate it'.
-    - CRITICAL NEGATIVE CONSTRAINT: Ban all AI clichés: "Hope this finds you well", "Hope you are doing well", "I was impressed by your profile", "Quick chat", "15-minute coffee chat".
+    - CRITICAL NEGATIVE CONSTRAINT: Never use an em dash (—) or en dash (–). Ban all AI clichés: "Hope this finds you well", "Hope you are doing well", "I was impressed by your profile", "Quick chat", "15-minute coffee chat", "delve", "leverage", "synergy", "unlock", "game-changer", "passionate about", "reaching out because", "pick your brain", "thought leader", "excited to connect", "would love to connect", "in today's fast-paced world", "navigate the landscape of", "incredible work", "truly inspiring", "Looking forward to hearing from you!", "Thanks in advance!".
     - COFFEE CHAT CONSTRAINT: If the candidate's seniority is Founder, CEO, VP, or Director, DO NOT request a coffee chat or a meeting in the Coffee Chat draft. Instead, write it as a brief, respectful request to connect/follow their work or ask a quick strategic question.
     
     FEW-SHOT TONE REFERENCE TEMPLATES:
@@ -718,7 +739,10 @@ def generate_thread_followup(api_key: str, twin_profile: str, candidate_profile:
     """
     system_instruction = (
         "You are Rishindra's LinkedIn message assistant. You are drafting a follow-up message in an ongoing "
-        "conversation thread. You write naturally, concisely, and with low pressure."
+        "conversation thread. You write naturally, concisely, and with low pressure, like a real person continuing "
+        "a real conversation, not a template. Never use an em dash or en dash. Never use AI-cliche phrasing "
+        "('delve', 'leverage', 'excited to connect', 'hope this finds you well', 'circle back', 'touch base'). "
+        "Contractions are normal. Vary sentence length. Say the specific thing, not the vague polished version of it."
     )
 
     # Format thread history

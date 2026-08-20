@@ -7,7 +7,7 @@ import {
   Zap, Loader2
 } from "lucide-react";
 
-const BACKEND_URL = "http://localhost:8000";
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
 export default function Home() {
   // Authentication State
@@ -71,6 +71,12 @@ export default function Home() {
   const [telegramTestLoading, setTelegramTestLoading] = useState(false);
   const [telegramTestMessage, setTelegramTestMessage] = useState("");
   const [telegramTestError, setTelegramTestError] = useState("");
+
+  // Slack integration state
+  const [slackWebhookUrl, setSlackWebhookUrl] = useState("");
+  const [slackTestLoading, setSlackTestLoading] = useState(false);
+  const [slackTestMessage, setSlackTestMessage] = useState("");
+  const [slackTestError, setSlackTestError] = useState("");
 
   // Interaction Log Chat Thread State
   const [threadLogs, setThreadLogs] = useState<any[]>([]);
@@ -231,6 +237,7 @@ export default function Home() {
         setLatexCode(mapped["resume_latex"] || "");
         setTelegramToken(mapped["telegram_token"] || "");
         setTelegramChatId(mapped["telegram_chat_id"] || "");
+        setSlackWebhookUrl(mapped["slack_webhook_url"] || "");
         setPacingInterval(mapped["pacing_interval_minutes"] || "15");
       }
     } catch (e) {
@@ -301,6 +308,7 @@ export default function Home() {
         { key: "resume_latex", value: latexCode },
         { key: "telegram_token", value: telegramToken },
         { key: "telegram_chat_id", value: telegramChatId },
+        { key: "slack_webhook_url", value: slackWebhookUrl },
         { key: "pacing_interval_minutes", value: pacingInterval }
       ]
     };
@@ -416,6 +424,27 @@ export default function Home() {
       setTelegramTestError(err.message || "Network error.");
     } finally {
       setTelegramTestLoading(false);
+    }
+  };
+
+  const handleTestSlack = async () => {
+    setSlackTestLoading(true);
+    setSlackTestMessage("");
+    setSlackTestError("");
+    try {
+      const res = await fetchWithAuth("/api/settings/test-slack", {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSlackTestMessage(data.message || "Test alert sent!");
+      } else {
+        setSlackTestError(data.detail || "Failed to send test alert.");
+      }
+    } catch (err: any) {
+      setSlackTestError(err.message || "Network error.");
+    } finally {
+      setSlackTestLoading(false);
     }
   };
 
@@ -814,7 +843,7 @@ export default function Home() {
             }`}
           >
             <Settings size={18} />
-            <span>Telegram & Pacing</span>
+            <span>Notifications & Pacing</span>
           </button>
         </nav>
 
@@ -898,7 +927,7 @@ export default function Home() {
                 </button>
                 <button 
                   onClick={() => setShowAddModal(true)}
-                  className="bg-zinc-900 border border-zinc-850 hover:bg-zinc-800 hover:border-zinc-700 text-sm font-semibold text-zinc-300 hover:text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors cursor-pointer shadow-md"
+                  className="bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 hover:border-zinc-700 text-sm font-semibold text-zinc-300 hover:text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors cursor-pointer shadow-md"
                 >
                   <Plus size={16} />
                   <span>Add Outreach Target</span>
@@ -1115,7 +1144,7 @@ export default function Home() {
               <button 
                 onClick={handleSaveSettings}
                 disabled={settingsSaveLoading}
-                className="bg-zinc-900 border border-zinc-800 text-zinc-350 hover:bg-zinc-800 hover:text-white hover:border-zinc-700 text-sm font-semibold px-6 py-3 rounded-lg transition-colors cursor-pointer shadow-lg disabled:opacity-50"
+                className="bg-zinc-900 border border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-white hover:border-zinc-700 text-sm font-semibold px-6 py-3 rounded-lg transition-colors cursor-pointer shadow-lg disabled:opacity-50"
               >
                 {settingsSaveLoading ? "Saving Persona..." : "Save TwinAgent Configuration"}
               </button>
@@ -1178,7 +1207,7 @@ export default function Home() {
                   </div>
                   <button 
                     type="submit"
-                    className="w-full bg-zinc-900 border border-zinc-800 text-zinc-350 hover:bg-zinc-800 hover:text-white hover:border-zinc-700 text-xs font-semibold py-2.5 rounded transition-colors cursor-pointer shadow-lg"
+                    className="w-full bg-zinc-900 border border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-white hover:border-zinc-700 text-xs font-semibold py-2.5 rounded transition-colors cursor-pointer shadow-lg"
                   >
                     Register Key
                   </button>
@@ -1262,10 +1291,10 @@ export default function Home() {
           <div className="p-8 max-w-xl w-full mx-auto space-y-8">
             <div className="border-b border-zinc-800 pb-4">
               <h2 className="text-2xl font-bold text-white bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-400">
-                Outreach Pacing & Telegram Notifications
+                Outreach Pacing & Notifications
               </h2>
               <p className="text-xs text-zinc-400 mt-1">
-                Configure notification hooks and delay intervals.
+                Configure Telegram / Slack notification hooks and delay intervals.
               </p>
             </div>
 
@@ -1305,6 +1334,30 @@ export default function Home() {
 
               <hr className="border-zinc-800" />
 
+              {/* Slack config */}
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-white flex items-center space-x-2">
+                  <Send size={16} className="text-emerald-400" />
+                  <span>Slack Integration</span>
+                </h3>
+                <p className="text-xs text-zinc-400">
+                  Workers will post generated drafts to a Slack channel via an Incoming Webhook. Create one at <span className="font-mono text-zinc-300">api.slack.com/apps</span> &rarr; your app &rarr; Incoming Webhooks &rarr; Add New Webhook.
+                </p>
+
+                <div>
+                  <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">Slack Incoming Webhook URL</label>
+                  <input
+                    type="password"
+                    value={slackWebhookUrl}
+                    onChange={e => setSlackWebhookUrl(e.target.value)}
+                    placeholder="https://hooks.slack.com/services/..."
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-zinc-700"
+                  />
+                </div>
+              </div>
+
+              <hr className="border-zinc-800" />
+
               {/* Queue Pacing */}
               <div className="space-y-4">
                 <h3 className="text-sm font-semibold text-white">Queue Pacing Controls</h3>
@@ -1329,13 +1382,20 @@ export default function Home() {
                 <button 
                   onClick={handleTestTelegram}
                   disabled={telegramTestLoading}
-                  className="bg-zinc-850 hover:bg-zinc-800 text-xs font-semibold text-zinc-300 hover:text-white px-4 py-2.5 rounded border border-zinc-700 hover:border-zinc-600 transition-colors cursor-pointer disabled:opacity-50"
+                  className="bg-zinc-800 hover:bg-zinc-800 text-xs font-semibold text-zinc-300 hover:text-white px-4 py-2.5 rounded border border-zinc-700 hover:border-zinc-600 transition-colors cursor-pointer disabled:opacity-50"
                 >
                   {telegramTestLoading ? "Testing..." : "Test Telegram Connection"}
                 </button>
-                <button 
+                <button
+                  onClick={handleTestSlack}
+                  disabled={slackTestLoading}
+                  className="bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 hover:text-white px-4 py-2.5 rounded border border-zinc-700 hover:border-zinc-600 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {slackTestLoading ? "Testing..." : "Test Slack Connection"}
+                </button>
+                <button
                   onClick={handleSaveSettings}
-                  className="bg-zinc-900 border border-zinc-800 text-zinc-350 hover:bg-zinc-800 hover:text-white hover:border-zinc-700 text-xs font-semibold px-4 py-2.5 rounded transition-colors cursor-pointer shadow-lg"
+                  className="bg-zinc-900 border border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-white hover:border-zinc-700 text-xs font-semibold px-4 py-2.5 rounded transition-colors cursor-pointer shadow-lg"
                 >
                   Save Configuration
                 </button>
@@ -1352,6 +1412,16 @@ export default function Home() {
                   {telegramTestError}
                 </div>
               )}
+              {slackTestMessage && (
+                <div className="text-xs text-emerald-400 bg-emerald-950/20 border border-emerald-900/30 rounded-lg p-3 mt-3">
+                  {slackTestMessage}
+                </div>
+              )}
+              {slackTestError && (
+                <div className="text-xs text-rose-400 bg-rose-950/20 border border-rose-900/30 rounded-lg p-3 mt-3">
+                  {slackTestError}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1360,7 +1430,7 @@ export default function Home() {
 
       {/* 3. FLOATING DETAIL PANEL (Clicking Kanban Card Opens this sidebar) */}
       {selectedConnection && (
-        <div className="w-130 border-l border-zinc-800 bg-zinc-900/90 backdrop-blur z-30 flex flex-col shrink-0">
+        <div className="w-[520px] border-l border-zinc-800 bg-zinc-900/90 backdrop-blur z-30 flex flex-col shrink-0">
           
           {/* Header */}
           <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
@@ -1380,7 +1450,7 @@ export default function Home() {
                   href={selectedConnection.profile_url} 
                   target="_blank" 
                   rel="noopener noreferrer"
-                  className="mt-2 inline-flex items-center space-x-1 text-[10px] text-zinc-405 hover:text-white font-semibold hover:underline bg-zinc-900 px-2 py-1 border border-zinc-800 rounded"
+                  className="mt-2 inline-flex items-center space-x-1 text-[10px] text-zinc-400 hover:text-white font-semibold hover:underline bg-zinc-900 px-2 py-1 border border-zinc-800 rounded"
                 >
                   <span>View LinkedIn Profile ↗</span>
                 </a>
@@ -1471,24 +1541,24 @@ export default function Home() {
 
               <div className="grid grid-cols-3 gap-2 pt-2 border-t border-zinc-900">
                 {/* Decision Maker Badge */}
-                <div className="bg-zinc-900 border border-zinc-850 rounded p-2 text-center">
+                <div className="bg-zinc-900 border border-zinc-800 rounded p-2 text-center">
                   <span className="text-[8px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">Decision Maker</span>
                   <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                     selectedConnection.is_decision_maker === "yes" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
                     selectedConnection.is_decision_maker === "partial" ? "bg-zinc-900 text-zinc-400 border border-zinc-800" :
-                    "bg-zinc-850 text-zinc-400"
+                    "bg-zinc-800 text-zinc-400"
                   }`}>
                     {(selectedConnection.is_decision_maker || "no").toUpperCase()}
                   </span>
                 </div>
 
                 {/* Referral Potential Badge */}
-                <div className="bg-zinc-900 border border-zinc-850 rounded p-2 text-center">
+                <div className="bg-zinc-900 border border-zinc-800 rounded p-2 text-center">
                   <span className="text-[8px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">Referral Potential</span>
                   <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                     selectedConnection.referral_potential === "high" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
                     selectedConnection.referral_potential === "medium" ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" :
-                    "bg-zinc-850 text-zinc-400"
+                    "bg-zinc-800 text-zinc-400"
                   }`}>
                     {(selectedConnection.referral_potential || "medium").toUpperCase()}
                   </span>
@@ -1502,11 +1572,11 @@ export default function Home() {
                     hiringBadge = pIntel.hiring_badge_status || "OFF";
                   } catch(e) {}
                   return (
-                    <div className="bg-zinc-900 border border-zinc-850 rounded p-2 text-center">
+                    <div className="bg-zinc-900 border border-zinc-800 rounded p-2 text-center">
                       <span className="text-[8px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">Hiring Badge</span>
                       <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                         hiringBadge === "ON" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 animate-pulse" :
-                        "bg-zinc-850 text-zinc-500"
+                        "bg-zinc-800 text-zinc-500"
                       }`}>
                         {hiringBadge}
                       </span>
@@ -1558,7 +1628,7 @@ export default function Home() {
                       className={`flex-1 py-1 px-2 text-[9px] font-semibold rounded-md transition-colors cursor-pointer uppercase text-center whitespace-nowrap ${
                         intelTab === tab.id 
                           ? "bg-zinc-800 text-zinc-200 border border-zinc-700 font-bold" 
-                          : "text-zinc-500 hover:text-zinc-350"
+                          : "text-zinc-500 hover:text-zinc-400"
                       }`}
                     >
                       {tab.label}
@@ -1566,7 +1636,7 @@ export default function Home() {
                   ))}
                 </div>
 
-                <div className="bg-zinc-900 border border-zinc-805 rounded-lg p-3 text-xs space-y-3">
+                <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3 text-xs space-y-3">
                   {intelTab === "profile" && (() => {
                     try {
                       const data = JSON.parse(selectedConnection.profile_intelligence || "{}");
@@ -1699,14 +1769,14 @@ export default function Home() {
                           {data.motivation_hooks && (
                             <div>
                               <span className="text-[10px] text-zinc-400 font-semibold uppercase tracking-wider block mb-1">Motivation Hooks / Career Transitions</span>
-                              <p className="text-[11px] text-zinc-350 leading-relaxed bg-zinc-950 p-2 rounded">{data.motivation_hooks}</p>
+                              <p className="text-[11px] text-zinc-400 leading-relaxed bg-zinc-950 p-2 rounded">{data.motivation_hooks}</p>
                             </div>
                           )}
                           
                           {(selectedConnection.conversation_starter || data.conversation_starter) && (
                             <div>
                               <span className="text-[10px] text-emerald-400 font-semibold uppercase tracking-wider block mb-1">Conversation Starter Highlight</span>
-                              <p className="text-[11px] text-zinc-350 leading-relaxed bg-zinc-950 p-2 rounded border border-emerald-950/20">"{selectedConnection.conversation_starter || data.conversation_starter}"</p>
+                              <p className="text-[11px] text-zinc-400 leading-relaxed bg-zinc-950 p-2 rounded border border-emerald-950/20">"{selectedConnection.conversation_starter || data.conversation_starter}"</p>
                             </div>
                           )}
 
@@ -1793,7 +1863,7 @@ export default function Home() {
                       onClick={() => handleSelectVariant(selectedConnection.id, tab.id)}
                       className={`flex-1 py-1.5 px-2 text-[9px] font-semibold rounded-md transition-colors cursor-pointer uppercase text-center whitespace-nowrap ${
                         selectedVariant === tab.id 
-                          ? "bg-zinc-850 text-white border border-zinc-700 font-bold" 
+                          ? "bg-zinc-800 text-white border border-zinc-700 font-bold" 
                           : "text-zinc-500 hover:text-zinc-300"
                       }`}
                     >
@@ -1831,14 +1901,14 @@ export default function Home() {
                         selectedVariant === "tech" ? (selectedConnection.generated_outreach_technical || selectedConnection.generated_outreach_tech) :
                         (selectedConnection.generated_outreach_relationship || selectedConnection.generated_outreach_mixed)
                       )}
-                      className="bg-zinc-800 hover:bg-zinc-750 text-zinc-300 hover:text-white px-3 py-1.5 border border-zinc-700 rounded text-[10px] font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer"
+                      className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white px-3 py-1.5 border border-zinc-700 rounded text-[10px] font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer"
                     >
                       {copiedText ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
                       <span>{copiedText ? "Copied!" : "Copy Draft"}</span>
                     </button>
                     <button 
                       onClick={() => handleUpdateStatus(selectedConnection.id, "sent")}
-                      className="bg-zinc-900 border border-emerald-800/40 text-emerald-400 hover:bg-emerald-950/20 hover:text-emerald-350 hover:border-emerald-700 px-3 py-1.5 rounded text-[10px] font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer"
+                      className="bg-zinc-900 border border-emerald-800/40 text-emerald-400 hover:bg-emerald-950/20 hover:text-emerald-400 hover:border-emerald-700 px-3 py-1.5 rounded text-[10px] font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer"
                     >
                       <Send size={12} />
                       <span>Mark Sent</span>
@@ -1914,7 +1984,7 @@ export default function Home() {
                   </div>
                   <button 
                     onClick={handleAddThreadLog}
-                    className="bg-zinc-800 border border-zinc-750 hover:bg-zinc-750 text-zinc-300 hover:text-white px-3 py-1 text-[10px] rounded font-semibold transition-colors cursor-pointer"
+                    className="bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-300 hover:text-white px-3 py-1 text-[10px] rounded font-semibold transition-colors cursor-pointer"
                   >
                     Add Message
                   </button>
@@ -1935,7 +2005,7 @@ export default function Home() {
                 <button 
                   onClick={handleGenerateReply}
                   disabled={isGeneratingReply}
-                  className="w-full bg-zinc-900 border border-zinc-800 text-zinc-350 hover:bg-zinc-800 hover:text-white hover:border-zinc-700 text-xs font-semibold py-2 rounded transition-colors cursor-pointer shadow-lg flex items-center justify-center space-x-2 disabled:opacity-50"
+                  className="w-full bg-zinc-900 border border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-white hover:border-zinc-700 text-xs font-semibold py-2 rounded transition-colors cursor-pointer shadow-lg flex items-center justify-center space-x-2 disabled:opacity-50"
                 >
                   <RefreshCw size={12} className={isGeneratingReply ? "animate-spin" : ""} />
                   <span>{isGeneratingReply ? "Thinking..." : "Generate Follow-up Draft"}</span>
@@ -1991,7 +2061,7 @@ export default function Home() {
                       <span>{connPdfFiles.length} Profile PDFs selected</span>
                       <button type="button" onClick={() => setConnPdfFiles([])} className="text-rose-500 hover:underline font-semibold ml-2">Clear</button>
                     </div>
-                    <ul className="text-[10px] text-zinc-500 max-h-20 overflow-y-auto text-left list-disc list-inside px-4 mt-2 border-t border-zinc-850 pt-2">
+                    <ul className="text-[10px] text-zinc-500 max-h-20 overflow-y-auto text-left list-disc list-inside px-4 mt-2 border-t border-zinc-800 pt-2">
                       {connPdfFiles.map((file, i) => (
                         <li key={i} className="line-clamp-1">{file.name}</li>
                       ))}
@@ -2001,7 +2071,7 @@ export default function Home() {
                   <button 
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="text-xs bg-zinc-900 hover:bg-zinc-800 border border-zinc-850 px-3 py-1.5 rounded text-zinc-300 hover:text-white transition-colors cursor-pointer"
+                    className="text-xs bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 px-3 py-1.5 rounded text-zinc-300 hover:text-white transition-colors cursor-pointer"
                   >
                     Select PDF Profiles
                   </button>
@@ -2012,7 +2082,7 @@ export default function Home() {
               {/* Hiring Toggle Override */}
               <div className="space-y-1.5">
                 <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider">Hiring Status Override (for this group / profile)</label>
-                <div className="flex items-center space-x-4 bg-zinc-950 border border-zinc-850 rounded p-2 text-xs">
+                <div className="flex items-center space-x-4 bg-zinc-950 border border-zinc-800 rounded p-2 text-xs">
                   <label className="flex items-center space-x-2 cursor-pointer text-zinc-300">
                     <input
                       type="radio"
@@ -2137,7 +2207,7 @@ export default function Home() {
                     required={connPdfFiles.length === 0}
                     disabled={connPdfFiles.length > 0}
                     placeholder="e.g. John Doe"
-                    className="w-full bg-zinc-950 border border-zinc-850 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none disabled:opacity-50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none disabled:opacity-50"
                   />
                 </div>
                 <div>
@@ -2148,7 +2218,7 @@ export default function Home() {
                     onChange={e => setNewConnTitle(e.target.value)}
                     disabled={connPdfFiles.length > 0}
                     placeholder="e.g. Staff Engineer"
-                    className="w-full bg-zinc-950 border border-zinc-850 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none disabled:opacity-50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none disabled:opacity-50"
                   />
                 </div>
                 <div>
@@ -2159,7 +2229,7 @@ export default function Home() {
                     onChange={e => setNewConnCompany(e.target.value)}
                     disabled={connPdfFiles.length > 0}
                     placeholder="e.g. Stripe"
-                    className="w-full bg-zinc-950 border border-zinc-850 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none disabled:opacity-50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none disabled:opacity-50"
                   />
                 </div>
                 <div>
@@ -2170,7 +2240,7 @@ export default function Home() {
                     onChange={e => setNewConnLocation(e.target.value)}
                     disabled={connPdfFiles.length > 0}
                     placeholder="e.g. San Francisco, CA"
-                    className="w-full bg-zinc-950 border border-zinc-850 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none disabled:opacity-50"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none disabled:opacity-50"
                   />
                 </div>
               </div>
@@ -2182,7 +2252,7 @@ export default function Home() {
                   onChange={e => setNewConnPosts(e.target.value)}
                   placeholder="Paste raw text copy-paste of their last 3 to 5 original posts..."
                   rows={3}
-                  className="w-full bg-zinc-950 border border-zinc-855 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none"
                 />
               </div>
 
@@ -2190,14 +2260,14 @@ export default function Home() {
                 <button 
                   type="button" 
                   onClick={() => setShowAddModal(false)}
-                  className="bg-zinc-900 hover:bg-zinc-850 border border-zinc-850 px-4 py-2 rounded-lg text-xs font-semibold text-zinc-300 hover:text-white transition-colors cursor-pointer"
+                  className="bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 px-4 py-2 rounded-lg text-xs font-semibold text-zinc-300 hover:text-white transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button 
                   type="submit" 
                   disabled={connUploadLoading}
-                  className="bg-zinc-900 border border-zinc-800 text-zinc-350 hover:bg-zinc-800 hover:text-white hover:border-zinc-700 px-4 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50 shadow-lg shadow-zinc-950/40"
+                  className="bg-zinc-900 border border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-white hover:border-zinc-700 px-4 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50 shadow-lg shadow-zinc-950/40"
                 >
                   {connUploadLoading ? "Processing..." : "Add to Queue"}
                 </button>

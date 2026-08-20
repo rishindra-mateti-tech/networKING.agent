@@ -28,9 +28,12 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="networKING.agent SaaS API", version="1.0.0")
 
-# Mount uploads directory to serve screenshots static files
-os.makedirs("uploads", exist_ok=True)
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+# Mount uploads directory to serve screenshots static files. Overridable so a
+# deployed instance can point at a persistent volume instead of the working
+# directory, which would otherwise be wiped on every redeploy.
+UPLOADS_DIR = os.getenv("UPLOADS_DIR", "uploads")
+os.makedirs(UPLOADS_DIR, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
 # CORS middleware — scoped to CORS_ORIGINS (backend/.env), defaults to the local Next.js dev server.
 app.add_middleware(
@@ -44,7 +47,7 @@ app.add_middleware(
 # Startup and Shutdown Lifecycle Hooks
 @app.on_event("startup")
 async def startup_event():
-    os.makedirs("uploads", exist_ok=True)
+    os.makedirs(UPLOADS_DIR, exist_ok=True)
     QueueOrchestrator().start()
     # Sync workers for all existing users at startup
     db = next(get_db())
@@ -121,9 +124,9 @@ def register(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
     
     # Initialize basic settings keys for this user
     basic_keys = [
-        "resume_context", "resume_latex", "github_url", 
-        "portfolio_url", "linkedin_url", "telegram_token", 
-        "telegram_chat_id", "pacing_interval_minutes",
+        "resume_context", "resume_latex", "github_url",
+        "portfolio_url", "linkedin_url", "telegram_token",
+        "telegram_chat_id", "slack_webhook_url", "pacing_interval_minutes",
         "job_search_status", "target_roles", "learning_goals", "tone_examples"
     ]
     for key in basic_keys:
@@ -239,6 +242,30 @@ async def test_telegram_setting(current_user: models.User = Depends(get_current_
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to reach Telegram API: {str(e)}")
+
+@app.post("/api/settings/test-slack")
+async def test_slack_setting(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    settings_records = db.query(models.Setting).filter(models.Setting.user_id == current_user.id).all()
+    settings = {s.key: s.value for s in settings_records if s.value}
+    webhook_url = settings.get("slack_webhook_url", "").strip()
+
+    if not webhook_url:
+        raise HTTPException(status_code=400, detail="Slack Incoming Webhook URL must be configured in Settings first.")
+
+    payload = {
+        "text": ":tada: *networKING.agent Slack Notification Test!*\n\nYour Slack webhook is successfully connected and ready to send instant outreach alerts."
+    }
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.post(webhook_url, json=payload, timeout=10.0)
+            if res.status_code == 200:
+                return {"message": "Test notification sent successfully to your Slack channel!"}
+            else:
+                raise HTTPException(status_code=400, detail=f"Slack API Error ({res.status_code}): {res.text}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to reach Slack: {str(e)}")
 
 
 # --- API KEYS ENDPOINTS ---
@@ -399,7 +426,7 @@ async def upload_linkedin_profile(
         import uuid
         ext = os.path.splitext(screenshot.filename)[1] or ".png"
         filename = f"{uuid.uuid4()}{ext}"
-        filepath = os.path.join("uploads", filename)
+        filepath = os.path.join(UPLOADS_DIR, filename)
         try:
             with open(filepath, "wb") as f:
                 content = await screenshot.read()
