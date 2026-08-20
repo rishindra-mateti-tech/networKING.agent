@@ -12,11 +12,9 @@ own browser login (Fly and Vercel), so I can't run those for you.
 
 ## 1. Backend on Fly.io
 
-Install the CLI and log in (opens a browser):
-
-```bash
-powershell -c "iwr https://fly.io/install.ps1 -useb | iex"
-```
+Both CLIs (`flyctl`, `vercel`) are already installed on this machine. Open a
+**new** terminal window first so the updated PATH takes effect, then log in
+(opens a browser):
 
 ```bash
 fly auth login
@@ -68,10 +66,9 @@ curl https://<your-app-name>.fly.dev/docs
 
 ## 2. Frontend on Vercel
 
-Install the CLI and log in:
+Log in (opens a browser):
 
 ```bash
-npm install -g vercel
 vercel login
 ```
 
