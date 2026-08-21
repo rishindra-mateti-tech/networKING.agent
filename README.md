@@ -2,7 +2,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="frontend/public/logo-full-dark.png">
     <source media="(prefers-color-scheme: light)" srcset="frontend/public/logo-full-light.png">
-    <img src="frontend/public/logo-full-dark.png" alt="networKING.agent" width="420">
+    <img src="frontend/public/logo-full-light.png" alt="networKING.agent" width="420">
   </picture>
 </p>
 
