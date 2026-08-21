@@ -33,9 +33,18 @@ def _resolve_db_path() -> str:
 
 
 def run_migrations():
+    database_url = os.getenv("DATABASE_URL", "")
+    if database_url.startswith("postgres"):
+        # A fresh Postgres database gets the full current schema straight from
+        # the SQLAlchemy models (see Base.metadata.create_all in main.py) --
+        # the column-by-column ALTER TABLE dance below only exists to patch up
+        # SQLite files created before certain columns/encryption existed.
+        print("[MIGRATE] Postgres detected, skipping SQLite-specific column backfill.")
+        return
+
     db_path = _resolve_db_path()
     print(f"Running database migrations on: {db_path}")
-    
+
     if not os.path.exists(db_path):
         print("Database file does not exist yet. It will be initialized by SQLAlchemy.")
         return

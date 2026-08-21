@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { 
   Users, User, Key, Settings, LogOut, Search, Plus, Star, Trash2, 
   Send, RefreshCw, Check, Copy, Clipboard, FileText, ArrowRight, MessageSquare, AlertCircle,
-  Zap, Loader2
+  Zap, Loader2, Menu, X
 } from "lucide-react";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -95,6 +95,7 @@ export default function Home() {
   const resumeInputRef = useRef<HTMLInputElement>(null);
 
   const [isBackendOffline, setIsBackendOffline] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   // Fetch helper with Authorization header
   const fetchWithAuth = async (path: string, options: RequestInit = {}) => {
@@ -718,14 +719,15 @@ export default function Home() {
         <div className="max-w-md w-full bg-zinc-900 border border-zinc-800 rounded-2xl p-8 shadow-2xl relative overflow-hidden">
           <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-zinc-700 to-zinc-500"></div>
           <div className="text-center mb-8">
-            <h1 className="text-3xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-400">
-              networKING.agent
+            <img src="/icon-192.png" alt="networKING.agent" className="w-16 h-16 mx-auto mb-3" />
+            <h1 className="text-3xl font-extrabold tracking-tight text-[#ebe5d6]">
+              networ<span className="text-[#4d8565]">KING</span>.agent
             </h1>
             <p className="text-sm text-zinc-400 mt-2">
               Relationship-first LinkedIn outreach automation
             </p>
           </div>
-          
+
           <form onSubmit={handleAuthSubmit} className="space-y-6">
             <div>
               <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Email Address</label>
@@ -783,27 +785,48 @@ export default function Home() {
   }
 
   // --- SAAS DASHBOARD INTERFACE ---
+  const goToView = (view: "pipeline" | "twinagent" | "apikeys" | "settings") => {
+    setCurrentView(view);
+    setSelectedConnection(null);
+    setMobileNavOpen(false);
+  };
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-200 flex">
-      {/* 1. SIDEBAR */}
-      <aside className="w-64 border-r border-zinc-800 bg-zinc-900/50 flex flex-col z-20 shrink-0">
-        <div className="p-6 border-b border-zinc-800">
+      {/* Mobile nav backdrop */}
+      {mobileNavOpen && (
+        <div
+          onClick={() => setMobileNavOpen(false)}
+          className="fixed inset-0 bg-black/60 z-30 lg:hidden"
+        />
+      )}
+
+      {/* 1. SIDEBAR (off-canvas drawer on mobile/tablet, static column at lg+) */}
+      <aside className={`fixed lg:static inset-y-0 left-0 w-64 border-r border-zinc-800 bg-zinc-900 lg:bg-zinc-900/50 flex flex-col z-40 shrink-0 transform transition-transform duration-200 ${
+        mobileNavOpen ? "translate-x-0" : "-translate-x-full"
+      } lg:translate-x-0`}>
+        <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="w-8 h-8 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center font-bold text-zinc-300 shadow-md shadow-zinc-950/40">
-              N
-            </div>
+            <img src="/icon-192.png" alt="networKING.agent" className="w-9 h-9 rounded-lg shadow-md shadow-zinc-950/40" />
             <div>
-              <h1 className="text-base font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-400">
-                networKING.agent
+              <h1 className="text-base font-extrabold tracking-tight text-[#ebe5d6]">
+                networ<span className="text-[#4d8565]">KING</span>.agent
               </h1>
               <p className="text-[10px] text-zinc-500 font-mono">v1.0.0 SaaS Edition</p>
             </div>
           </div>
+          <button
+            onClick={() => setMobileNavOpen(false)}
+            className="lg:hidden p-1 text-zinc-500 hover:text-white cursor-pointer"
+            aria-label="Close menu"
+          >
+            <X size={18} />
+          </button>
         </div>
 
         <nav className="flex-1 p-4 space-y-1">
-          <button 
-            onClick={() => { setCurrentView("pipeline"); setSelectedConnection(null); }}
+          <button
+            onClick={() => goToView("pipeline")}
             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
               currentView === "pipeline" ? "bg-zinc-800 text-white font-semibold" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
             }`}
@@ -811,8 +834,8 @@ export default function Home() {
             <Users size={18} />
             <span>Outreach Pipeline</span>
           </button>
-          <button 
-            onClick={() => { setCurrentView("twinagent"); setSelectedConnection(null); }}
+          <button
+            onClick={() => goToView("twinagent")}
             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
               currentView === "twinagent" ? "bg-zinc-800 text-white font-semibold" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
             }`}
@@ -820,8 +843,8 @@ export default function Home() {
             <User size={18} />
             <span>TwinAgent Profile</span>
           </button>
-          <button 
-            onClick={() => { setCurrentView("apikeys"); setSelectedConnection(null); }}
+          <button
+            onClick={() => goToView("apikeys")}
             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
               currentView === "apikeys" ? "bg-zinc-800 text-white font-semibold" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
             }`}
@@ -836,8 +859,8 @@ export default function Home() {
               )}
             </div>
           </button>
-          <button 
-            onClick={() => { setCurrentView("settings"); setSelectedConnection(null); }}
+          <button
+            onClick={() => goToView("settings")}
             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
               currentView === "settings" ? "bg-zinc-800 text-white font-semibold" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
             }`}
@@ -848,7 +871,7 @@ export default function Home() {
         </nav>
 
         <div className="p-4 border-t border-zinc-800">
-          <button 
+          <button
             onClick={handleLogout}
             className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium text-zinc-400 hover:bg-rose-950/20 hover:text-rose-400 transition-colors cursor-pointer"
           >
@@ -860,6 +883,22 @@ export default function Home() {
 
       {/* 2. MAIN WORKSPACE CONTENT */}
       <main className="flex-1 min-w-0 flex flex-col overflow-y-auto relative bg-zinc-950">
+        {/* Mobile/tablet top bar (sidebar is off-canvas below the lg breakpoint) */}
+        <div className="lg:hidden flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-zinc-900/50 shrink-0 sticky top-0 z-20">
+          <button
+            onClick={() => setMobileNavOpen(true)}
+            className="p-2 -ml-2 text-zinc-300 hover:text-white cursor-pointer"
+            aria-label="Open menu"
+          >
+            <Menu size={20} />
+          </button>
+          <h1 className="text-sm font-bold text-[#ebe5d6] flex items-center gap-2">
+            <img src="/icon-192.png" alt="networKING.agent" className="w-6 h-6 rounded-md" />
+            networ<span className="text-[#4d8565]">KING</span>.agent
+          </h1>
+          <div className="w-9" />
+        </div>
+
         {isBackendOffline && (
           <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2.5 text-xs text-amber-400 text-center flex items-center justify-center space-x-2 font-medium shrink-0">
             <AlertCircle size={14} className="shrink-0" />
@@ -1028,7 +1067,7 @@ export default function Home() {
 
         {/* VIEW B: TWINAGENT PERSONAL SETTINGS */}
         {currentView === "twinagent" && (
-          <div className="p-8 max-w-4xl w-full mx-auto space-y-8">
+          <div className="p-4 sm:p-8 max-w-4xl w-full mx-auto space-y-8">
             <div className="border-b border-zinc-800 pb-4">
               <h2 className="text-2xl font-bold text-white bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-400">
                 TwinAgent Professional Persona Configuration
@@ -1155,7 +1194,7 @@ export default function Home() {
 
         {/* VIEW C: API KEYS & WORKERTHREADS POOL */}
         {currentView === "apikeys" && (
-          <div className="p-8 max-w-4xl w-full mx-auto space-y-8">
+          <div className="p-4 sm:p-8 max-w-4xl w-full mx-auto space-y-8">
             <div className="border-b border-zinc-800 pb-4">
               <h2 className="text-2xl font-bold text-white flex items-center justify-between">
                 <span>Gemini API Key Workers Pool</span>
@@ -1288,7 +1327,7 @@ export default function Home() {
 
         {/* VIEW D: TELEGRAM & GENERAL PACING SETTINGS */}
         {currentView === "settings" && (
-          <div className="p-8 max-w-xl w-full mx-auto space-y-8">
+          <div className="p-4 sm:p-8 max-w-xl w-full mx-auto space-y-8">
             <div className="border-b border-zinc-800 pb-4">
               <h2 className="text-2xl font-bold text-white bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-400">
                 Outreach Pacing & Notifications
@@ -1430,7 +1469,7 @@ export default function Home() {
 
       {/* 3. FLOATING DETAIL PANEL (Clicking Kanban Card Opens this sidebar) */}
       {selectedConnection && (
-        <div className="w-[520px] border-l border-zinc-800 bg-zinc-900/90 backdrop-blur z-30 flex flex-col shrink-0">
+        <div className="fixed lg:static inset-0 lg:inset-auto w-full lg:w-[520px] border-l border-zinc-800 bg-zinc-900 lg:bg-zinc-900/90 backdrop-blur z-30 flex flex-col shrink-0">
           
           {/* Header */}
           <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
@@ -2197,7 +2236,7 @@ export default function Home() {
 
               <div className="text-center text-[10px] text-zinc-500 font-mono uppercase tracking-wider">Or Input Manually</div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">Full Name</label>
                   <input 

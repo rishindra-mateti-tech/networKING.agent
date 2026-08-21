@@ -3,17 +3,26 @@ import os
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-# Overridable so a deployed instance can point at a persistent volume
-# (e.g. sqlite:////data/networking.db) instead of the working directory,
-# which would otherwise be wiped on every redeploy.
+# Overridable so a deployed instance can point at a real hosted database
+# (Postgres) instead of a local file, which would otherwise be wiped on
+# every restart on hosts with no persistent disk (e.g. Render's free tier).
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./networking.db")
 
+# Some hosts (Render, Heroku-style) still hand out "postgres://" URLs, but
+# SQLAlchemy's psycopg driver requires the "postgresql://" scheme.
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+IS_SQLITE = DATABASE_URL.startswith("sqlite")
+
 # connect_args={"check_same_thread": False} is required for SQLite in FastAPI to allow multi-threaded access.
+# Postgres needs no such flag.
 engine = create_engine(
-    DATABASE_URL, connect_args={"check_same_thread": False}
+    DATABASE_URL,
+    connect_args={"check_same_thread": False} if IS_SQLITE else {},
 )
 
-if DATABASE_URL.startswith("sqlite"):
+if IS_SQLITE:
     @event.listens_for(engine, "connect")
     def _set_sqlite_pragmas(dbapi_connection, connection_record):
         # WAL lets readers and writers proceed concurrently instead of locking

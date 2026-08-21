@@ -1,3 +1,11 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="frontend/public/logo-full-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="frontend/public/logo-full-light.png">
+    <img src="frontend/public/logo-full-dark.png" alt="networKING.agent" width="420">
+  </picture>
+</p>
+
 # networKING.agent
 
 **A multi-agent AI system I built to research and draft networking outreach more thoughtfully. I still read, edit, and personally send every single message.**
@@ -42,7 +50,7 @@ This bootstraps a virtualenv, installs backend + frontend dependencies, and star
 
 You'll need your own Gemini API key (free tier from [Google AI Studio](https://aistudio.google.com/apikey)), added from the app's "API Key Workers" screen after you sign up.
 
-Deploying this somewhere real (Fly.io + Vercel): see [DEPLOY.md](DEPLOY.md).
+Deploying this somewhere real (Render + Neon Postgres + Vercel, entirely free, no card required): see [DEPLOY.md](DEPLOY.md).
 
 ***
 

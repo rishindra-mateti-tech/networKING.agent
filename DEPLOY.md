@@ -1,91 +1,100 @@
 # Deploying networKING.agent
 
-Backend on Fly.io (free, stays on, supports the persistent SQLite volume the
-background workers need). Frontend on Vercel (free, built for Next.js).
+Backend on Render's free tier, database on Neon (free Postgres), keep-alive
+pings from cron-job.org, frontend on Vercel. Every piece of this is free
+with no credit card required anywhere.
 
-Why not Render's free tier: it spins the process down after 15 minutes of no
-traffic, which kills the QueueOrchestrator's background workers between
-requests. Fly's free allowance keeps one small machine running continuously.
+Why this combination: Render's free web services have no persistent disk,
+so the app can't keep using a local SQLite file, hence the Postgres swap.
+Render's free tier also sleeps after 15 minutes of no traffic, which would
+otherwise kill the QueueOrchestrator's background workers between visits,
+hence the keep-alive pinger. Fly.io was the cleaner architectural fit (an
+always-on box with a real volume) but as of 2026 it requires a card even
+for its now-time-limited trial, so it's off the table per your call.
 
-Total time: about 15 minutes, mostly waiting on builds. Two steps need your
-own browser login (Fly and Vercel), so I can't run those for you.
+Total time: about 20 minutes, mostly account signups and waiting on the
+first deploy. Every login step needs your own browser, so those parts are
+yours to do; I can drive everything else once you hand me the resulting
+URLs and connection strings.
 
-## 1. Backend on Fly.io
+## 1. Database: Neon (free Postgres)
 
-Both CLIs (`flyctl`, `vercel`) are already installed on this machine. Open a
-**new** terminal window first so the updated PATH takes effect, then log in
-(opens a browser):
+1. Go to [neon.tech](https://neon.tech) and sign up (GitHub login is fastest, no card).
+2. Create a new project, any name, any region close to you.
+3. On the project dashboard, copy the **connection string** it gives you.
+   It looks like:
+   `postgresql://user:password@ep-xxxx.us-east-2.aws.neon.tech/dbname?sslmode=require`
+4. Save that somewhere, you'll paste it into Render as `DATABASE_URL` in step 2.
 
-```bash
-fly auth login
-```
+(Supabase is an equally good free alternative if you'd rather use that,
+same idea: sign up, create a project, grab the Postgres connection string
+from Project Settings -> Database.)
 
-From the `backend/` folder, create the app (it will detect `fly.toml`, say
-no to the "would you like to deploy now" prompt, we need to set secrets and
-the volume first):
+## 2. Backend: Render
 
-```bash
-cd backend
-fly launch --no-deploy --copy-config
-```
+1. Go to [render.com](https://render.com) and sign up (GitHub login again, no card).
+2. Push this repo to GitHub if it isn't already up to date (I'll handle the
+   commit/push when you're ready).
+3. In Render, click **New -> Blueprint**, connect your GitHub account, and
+   pick this repo. Render will detect `render.yaml` at the repo root and
+   pre-fill the service from it.
+4. It'll ask you to fill in four environment variables it found marked as
+   "sync: false" in the blueprint (kept out of the repo on purpose):
+   - `DATABASE_URL`: the Neon connection string from step 1
+   - `JWT_SECRET_KEY`: use the value already in your local `backend/.env`
+   - `ENCRYPTION_KEY`: same, from `backend/.env`
+   - `CORS_ORIGINS`: leave this as `http://localhost:3000` for now, we'll
+     update it once the Vercel URL exists (step 4)
+5. Click **Apply**. Render builds and deploys. First build takes a few
+   minutes. When it's live, you'll get a URL like
+   `https://networking-agent-api.onrender.com`.
+6. Confirm it's actually up:
+   ```bash
+   curl https://networking-agent-api.onrender.com/health
+   ```
+   Should return `{"status":"ok"}`.
 
-If it says the app name `networking-agent-api` is taken, edit `app = "..."`
-at the top of `fly.toml` to something unique, then continue.
+Using the same `JWT_SECRET_KEY` / `ENCRYPTION_KEY` you already have locally
+matters: if Render generated fresh ones instead, every existing session
+would be invalidated and any API key you'd already encrypted and stored
+would become undecryptable. Since this is a brand-new Postgres database
+anyway (nothing to preserve there), this mostly matters if you want your
+JWT signing to behave consistently between local dev and prod, but there's
+no downside to just reusing the same values, so do that.
 
-Create the persistent volume (must match the region you picked, and the
-`source = "networking_data"` name in `fly.toml`):
+## 3. Keep the free tier awake: cron-job.org
 
-```bash
-fly volumes create networking_data --size 1 --region iad
-```
+Render's free tier spins the service down after 15 minutes of no incoming
+requests. Since the background outreach queue needs to keep running even
+when nobody's looking at the dashboard, ping it periodically:
 
-Set the JWT/encryption secrets so they survive redeploys. Use the values
-already in your local `backend/.env` so nothing already encrypted breaks,
-or generate fresh ones if this is a clean start:
+1. Go to [cron-job.org](https://cron-job.org) and sign up (free, no card).
+2. Create a new cron job:
+   - URL: `https://networking-agent-api.onrender.com/health`
+   - Schedule: every 10 minutes
+3. Save it. That's the whole setup, it just needs to exist and fire.
 
-```bash
-fly secrets set JWT_SECRET_KEY="<value from backend/.env>" ENCRYPTION_KEY="<value from backend/.env>"
-```
+This isn't a perfect always-on guarantee (a cold service can still take a
+few seconds to wake if a ping happens to land right as it's spinning down),
+but in practice it keeps the app responsive and the queue moving.
 
-This part matters: without pinning these as Fly secrets, `config.py`
-regenerates them on every redeploy, which logs every user out and makes
-every previously-stored Gemini API key undecryptable. Do this before the
-first deploy.
+## 4. Frontend: Vercel
 
-Deploy:
-
-```bash
-fly deploy
-```
-
-Your API is now live at `https://<your-app-name>.fly.dev`. Confirm it's up:
-
-```bash
-curl https://<your-app-name>.fly.dev/docs
-```
-
-## 2. Frontend on Vercel
-
-Log in (opens a browser):
-
-```bash
-vercel login
-```
-
-From the `frontend/` folder:
+Already logged in via `vercel login` earlier in this session. From the
+`frontend/` folder:
 
 ```bash
 cd frontend
 vercel link
 ```
 
-Set the backend URL as an environment variable (repeat for Production,
-Preview, and Development if it asks, or just Production for now):
+Set the backend URL as an environment variable:
 
 ```bash
 vercel env add NEXT_PUBLIC_BACKEND_URL production
 ```
-Paste `https://<your-app-name>.fly.dev` when prompted.
+Paste your Render URL (e.g. `https://networking-agent-api.onrender.com`)
+when prompted.
 
 Deploy:
 
@@ -95,45 +104,53 @@ vercel --prod
 
 You'll get a URL like `https://networking-agent.vercel.app`.
 
-## 3. Close the loop: allow the frontend to call the backend
+## 5. Close the loop: let the frontend actually call the backend
 
-Add the Vercel URL to the backend's CORS allowlist:
+Go back to Render, open the service's Environment tab, and update
+`CORS_ORIGINS` to your real Vercel URL:
 
-```bash
-fly secrets set CORS_ORIGINS="https://networking-agent.vercel.app" --app <your-app-name>
+```
+CORS_ORIGINS=https://networking-agent.vercel.app
 ```
 
-(If you also want to keep using it locally, use a comma-separated list:
-`CORS_ORIGINS=http://localhost:3000,https://networking-agent.vercel.app`)
+(Comma-separate if you also want `http://localhost:3000` in there for
+local dev against the prod backend.) Save, Render redeploys automatically
+with the new value.
 
-That's a new deploy trigger, so Fly will restart the machine automatically
-with the new value applied.
-
-## 4. Verify end to end
+## 6. Verify end to end
 
 1. Open the Vercel URL, register an account.
 2. Add a Gemini API key under "API Key Workers" (free tier key from
    [Google AI Studio](https://aistudio.google.com/apikey)).
-3. Add an outreach target (paste details manually is fastest to test).
+3. Add an outreach target.
 4. Watch it move from Pending -> Processing -> Draft Ready.
 
-If step 4 hangs on Processing, check backend logs:
+If step 4 hangs, check the Render service logs (Render dashboard -> your
+service -> Logs).
 
-```bash
-fly logs --app <your-app-name>
-```
+## Known limitation: profile screenshots
+
+Uploaded LinkedIn screenshots are saved to local disk (`backend/uploads/`).
+Render's free tier has no persistent disk, so uploaded screenshots will be
+lost whenever the service restarts or redeploys. This doesn't affect
+anything else (screenshots are an optional enrichment input, not required
+for the pipeline to work), but if you want those to survive too, the fix
+is routing uploads to a free object store (Supabase Storage pairs
+naturally with a Supabase Postgres setup) instead of local disk. Not done
+here since it's a real feature addition, not a deploy-config change, ask
+if you want it.
 
 ## Notes on the "10 users" requirement
 
-- The orchestrator spins up one background worker per active Gemini API key,
-  per user, inside a single process. Fly must stay pinned at exactly 1
-  machine (already set in `fly.toml` via `min_machines_running = 1` and no
-  autoscaling) or you'd get duplicate uncoordinated worker pools hitting the
-  same database from two machines.
-- SQLite is now running in WAL mode (`database.py`), so reads and writes
-  from the API and from background workers don't lock each other out. Fine
-  for 10 concurrent users; if this grows well past that, the next real step
-  is Postgres, not a bigger SQLite hack.
-- The free Fly machine (`shared-cpu-1x`, 512MB) is CPU-light work; the
-  actual bottleneck at scale is Gemini API rate limits per key, which the
-  existing key-pool failover in `orchestrator.py` already handles.
+- The orchestrator spins up one background worker per active Gemini API
+  key, per user, inside a single process. Render's free web service runs
+  exactly one instance, which matches this design; don't scale it to
+  multiple instances without also redesigning the orchestrator, since two
+  instances would run duplicate, uncoordinated worker pools against the
+  same database.
+- SQLite's WAL mode change from earlier doesn't apply once you're on
+  Postgres (it's a no-op there, guarded in `database.py`), Postgres already
+  handles concurrent readers/writers properly on its own.
+- The free Render machine is CPU-light work; the actual bottleneck at scale
+  is Gemini API rate limits per key, which the existing key-pool failover
+  in `orchestrator.py` already handles.

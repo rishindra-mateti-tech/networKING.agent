@@ -28,6 +28,11 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="networKING.agent SaaS API", version="1.0.0")
 
+@app.get("/health")
+def health_check():
+    """Cheap, no-DB-touch endpoint for uptime pingers to keep a free-tier host from sleeping."""
+    return {"status": "ok"}
+
 # Mount uploads directory to serve screenshots static files. Overridable so a
 # deployed instance can point at a persistent volume instead of the working
 # directory, which would otherwise be wiped on every redeploy.
