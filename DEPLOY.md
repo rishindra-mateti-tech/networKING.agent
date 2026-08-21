@@ -4,6 +4,16 @@ Backend on Render's free tier, database on Neon (free Postgres), keep-alive
 pings from cron-job.org, frontend on Vercel. Every piece of this is free
 with no credit card required anywhere.
 
+**Live right now:**
+- Frontend: https://frontend-psi-seven-fptzxsze1f.vercel.app
+- Backend: https://networking-agent-api.onrender.com
+- Neon project: `networking-agent` (org "Rishindra", AWS US East 2)
+- Keep-alive: cron-job.org job "keep networking-agent awake", every 10 min
+
+If you ever need to redeploy from scratch (new Render service, rotated
+Neon password, etc.), the steps below still apply, just repeat whichever
+step changed and re-wire the URLs above.
+
 Why this combination: Render's free web services have no persistent disk,
 so the app can't keep using a local SQLite file, hence the Postgres swap.
 Render's free tier also sleeps after 15 minutes of no traffic, which would

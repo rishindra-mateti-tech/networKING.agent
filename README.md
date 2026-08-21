@@ -10,9 +10,11 @@
 
 **A multi-agent AI system I built to research and draft networking outreach more thoughtfully. I still read, edit, and personally send every single message.**
 
+**[Live Demo](https://frontend-psi-seven-fptzxsze1f.vercel.app)** (needs your own free Gemini API key to actually run anything, see "Running it locally" below for where to get one)
+
 I'm Rishindra, an MS Computer Science student at Wright State University, building AI/ML systems (most recently as an AI Engineer Intern at ZUZU.AI, working on RAG pipelines and FastAPI backends). This is a personal project born out of a very unglamorous problem: doing real, well-researched networking outreach on LinkedIn (the kind that references someone's actual work instead of a generic "loved your profile!") takes real time per person. I wanted to see if I could build an agent system that does the *research* part well, so the time I spend is on judgment (who to reach out to, what to actually say, whether to hit send), not on re-reading the same profile five times to find something honest to say.
 
-**If you're a recruiter, founder, or someone I reached out to and ended up here out of curiosity: hi 👋** Nothing here auto-sends anything to anyone. There's no LinkedIn bot, no bulk blasting, no API hook into LinkedIn's messaging at all. Every message this generates is a draft that lands in my own dashboard for me to read, edit, and copy-paste myself. What you're looking at is the "research assistant plus first draft" layer of something I'd have done manually anyway, and honestly, if this repo is how you found me, that probably means it worked.
+**If you got a LinkedIn message from me and ended up here out of curiosity: hi.** That message was real. I wrote it, read it over, and sent it myself, this project is just the thing that helped me get there. There's no LinkedIn bot, no bulk blasting, no API hook into LinkedIn's messaging at all. It reads a profile, does the research I'd otherwise do by hand, and drafts a few message options into my own dashboard for me to pick from, edit, and send myself. If you're wondering why the message referenced something specific about your work instead of a generic "great profile!", that's the part this project exists to do well.
 
 ## What it actually does
 
@@ -33,7 +35,7 @@ I'm Rishindra, an MS Computer Science student at Wright State University, buildi
 
 | Layer | Tech |
 |---|---|
-| Backend | FastAPI, SQLAlchemy, SQLite |
+| Backend | FastAPI, SQLAlchemy (SQLite locally, Postgres in production) |
 | AI | Google Gemini (`google-genai`), 5-stage agent pipeline |
 | Auth | JWT (`python-jose`), bcrypt password hashing |
 | Security | Fernet (AES) encryption at rest for API keys, per-install generated secrets |
