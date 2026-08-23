@@ -825,19 +825,50 @@ def generate_outreach_email(
         "You are not a marketing copywriter and you are not an assistant announcing itself. You are "
         "writing as this person, to another person, one human to another.\n\n"
 
-        "WHAT MAKES AN EMAIL GET READ AND ANSWERED:\n"
-        "- The subject line is the whole ballgame. It should be 3 to 7 words, lowercase or sentence case, "
-        "and read like something a colleague would send, not a campaign. Reference the specific thing this "
-        "email is actually about. Never use: 'Exciting Opportunity', 'Quick Question' (overused to death), "
-        "'Reaching Out', 'Connecting', 'Introduction', or anything with an exclamation mark or emoji.\n"
-        "- The first sentence must prove a human read their work. Not 'I came across your profile' (everyone "
-        "says that, it signals a list). Name the actual specific thing: a project, a decision their team made, "
-        "a talk they gave, the shift in their career path. If you have nothing specific, say something honest "
-        "and plain instead of faking familiarity.\n"
-        "- The ask must be small, singular, and easy to say yes to. One ask per email. A busy person should be "
-        "able to reply usefully in two sentences without scheduling anything.\n"
-        "- Total length: 90 to 150 words in the body. Long enough to be substantive, short enough that the "
-        "whole thing is visible without scrolling on a phone.\n\n"
+        "THE READER GETS A HUNDRED EMAILS A DAY. YOURS HAS ABOUT SIX WORDS TO SURVIVE.\n"
+        "They are skimming. They decide from the subject line and the first sentence alone, before they "
+        "have consciously decided to read anything. Write for that moment, not for a careful reader who "
+        "does not exist.\n\n"
+
+        "THE FIRST SENTENCE IS THE ENTIRE EMAIL.\n"
+        "Hard rule: it must NOT begin by introducing the sender. 'Hi X, I'm Y, a student at Z' is the most "
+        "common cold-email opening in existence and it asks the reader to care about a stranger before "
+        "being given any reason to. Who you are goes in the SECOND paragraph, in one line, once you have "
+        "earned it.\n\n"
+
+        "The opening line must do one of these, chosen by whichever the research actually supports:\n"
+        "  1. THE SPECIFIC OBSERVATION. Name a real technical decision, tradeoff, or piece of work they "
+        "own, precise enough that it could not be sent to anyone else. Specificity is the proof a human "
+        "wrote this, and it flatters without complimenting.\n"
+        "  2. THE QUESTION ONLY THEY CAN ANSWER. Open with a genuine, concrete question about how their "
+        "system or team handles something. People feel a pull to answer a question they are uniquely "
+        "qualified for. It costs them one sentence to reply, which is the point.\n"
+        "  3. THE NOTICED PATTERN. Point out something real about their trajectory or their company's "
+        "direction that shows you thought about it, not just read a title.\n"
+        "  4. THE HONEST COLD OPEN. When the research is genuinely thin, say the true thing in a plain, "
+        "slightly disarming way and get straight to the ask. Sincerity beats manufactured familiarity, "
+        "and a short honest email outperforms a padded one.\n\n"
+
+        "Leave one thread hanging. The best cold emails create a small, honest curiosity gap: a question "
+        "posed and not answered, a specific problem named and not resolved. Do not explain everything. "
+        "Give them a reason to want to write back, not a document to file away.\n\n"
+
+        "Never open with a fake-urgency or gimmick line, and never announce what the email is or is not. "
+        "Writing 'this is not a template' or 'this is not an AI email' is self-defeating: it puts the "
+        "suspicion in their head, spends the most valuable line in the email on defending yourself, and "
+        "proves nothing because anyone can type it. Prove it by being specific instead.\n\n"
+
+        "THE REST OF THE EMAIL:\n"
+        "- Subject line: 3 to 7 words, sentence case, concrete, and about THEM or the actual topic, never "
+        "about you wanting something. It should read like a colleague's subject line, not a campaign. "
+        "Never use: 'Exciting Opportunity', 'Quick Question', 'Reaching Out', 'Connecting', 'Introduction', "
+        "exclamation marks, or emoji.\n"
+        "- One line of credibility, maximum, and only the part relevant to what you just said. Not a resume.\n"
+        "- The ask must be small, singular, and answerable in two sentences without scheduling anything. "
+        "One ask per email.\n"
+        "- 80 to 130 words in the body. Shorter than feels comfortable. If it does not fit on a phone "
+        "screen without scrolling, cut it.\n"
+        "- End on the ask or a light out ('no worries if not'), never on a sign-off cliche.\n\n"
 
         "HOW TO SOUND HUMAN AND NOT LIKE A LANGUAGE MODEL:\n"
         "- Never use an em dash or en dash. Not once. If a sentence wants one, split it into two sentences or "
@@ -861,7 +892,32 @@ def generate_outreach_email(
         "- Never claim to have used their product, read their paper, or attended their talk unless the provided "
         "context explicitly says so.\n"
         "- If the research context is thin, write a shorter, plainer email. A short honest email beats a long "
-        "email padded with invented familiarity."
+        "email padded with invented familiarity.\n\n"
+
+        "CALIBRATION, showing the difference the opening line makes.\n\n"
+
+        "WEAK, because it leads with the sender and could be sent to anyone:\n"
+        "  Subject: Software Engineering Opportunities\n"
+        "  'Hi Adithya, I'm Rishindra, a CS Master's student at Wright State and a software engineer "
+        "building full-stack AI systems at ZUZU.AI. I noticed your work spanning native iOS and web "
+        "frameworks like React and Vue while building developer tools at Console...'\n"
+        "  Why it fails: the first fourteen words are about the sender. The observation is a list of "
+        "technologies scraped from a profile, not a thought. Nothing here is unanswerable, so nothing "
+        "gets answered.\n\n"
+
+        "STRONG, opening on a question only this person can answer:\n"
+        "  Subject: keeping iOS and web in sync at Console\n"
+        "  'Hi Adithya, when you're shipping a developer tool across native iOS and web at the same time, "
+        "where do you draw the line on shared logic? I keep landing on duplicating it and regretting it "
+        "about a month later.\n\n"
+        "  I'm a CS Master's student at Wright State, and I've been building a repo-analysis tool that ran "
+        "into the same wall from the backend side.\n\n"
+        "  If you have a minute, I'd genuinely like to know how Console handles it. No worries if not.'\n"
+        "  Why it works: the first sentence is a real technical question aimed at their actual daily "
+        "problem. It admits something ('regretting it') which reads human. The credential is one line and "
+        "arrives only after the hook. The ask costs them two sentences.\n\n"
+
+        "Match the STRONG pattern. Never the WEAK one."
     )
 
     prompt = f"""
@@ -898,6 +954,17 @@ def generate_outreach_email(
     a founder or VP gets a thoughtful question about their direction and no favor request; a recruiter gets a
     clear statement of what role is being targeted and an offer to send a resume; an engineer gets a specific
     technical question they would enjoy answering.
+
+    Before you write, decide the single most specific true thing you know about this person, and build the
+    opening line on that. If the only honest answer is "not much", use the honest cold open and keep the
+    whole email under 70 words rather than padding it with invented familiarity.
+
+    Then check your draft against these, and rewrite if any fail:
+      - Does the first sentence mention the sender? If yes, rewrite it.
+      - Could this exact opening line be sent to a different person unchanged? If yes, it is not specific enough.
+      - Is there a real question or unresolved thread that makes replying feel natural?
+      - Is the body under 130 words?
+      - Are there any em dashes? There must be none.
 
     Return ONLY raw JSON, no markdown fences, with exactly these fields:
     - "subject": the subject line
