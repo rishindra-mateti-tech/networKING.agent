@@ -92,6 +92,11 @@ class ConnectionOut(BaseModel):
     personalization_data: Optional[str] = None
     context_summary: Optional[str] = None
     error_message: Optional[str] = None
+    sent_at: Optional[datetime] = None
+    replied_at: Optional[datetime] = None
+    conversation_verdict: Optional[str] = None
+    conversation_verdict_reason: Optional[str] = None
+    conversation_recommended_action: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -145,6 +150,7 @@ class InteractionLogOut(BaseModel):
     user_id: int
     sender: str
     message: str
+    screenshot_path: Optional[str] = None
     created_at: datetime
 
     class Config:

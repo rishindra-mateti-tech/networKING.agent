@@ -777,3 +777,83 @@ def generate_thread_followup(api_key: str, twin_profile: str, candidate_profile:
         return clean_unicode_text(reply_text.strip())
     except Exception as e:
         return f"Error generating follow-up: {str(e)}"
+
+
+def analyze_conversation_screenshot(
+    api_key: str,
+    candidate_name: str,
+    screenshot_path: str,
+    thread_history: Optional[list] = None,
+) -> dict:
+    """
+    Reads a screenshot of a LinkedIn conversation and judges how it's actually
+    going: is this person genuinely engaged, being politely vague, or clearly
+    not interested, plus what to do next. Meant to be run per uploaded
+    screenshot so a busy pipeline of replies can be triaged at a glance
+    instead of re-reading every thread by hand.
+    """
+    system_instruction = (
+        "You are a blunt, experienced networking coach reviewing a screenshot of a real LinkedIn "
+        "conversation. Your job is to judge how genuinely engaged the other person is, not to be polite "
+        "about it. Read tone, specificity, and effort in their replies, not just whether they replied at "
+        "all. A fast one-line reply can be genuinely warm; a long reply can still be a generic brush-off. "
+        "Never use an em dash or en dash."
+    )
+
+    history_str = ""
+    if thread_history:
+        for msg in thread_history:
+            sender_label = "Rishindra (sent)" if msg.get("sender") == "user" else "Them (received)"
+            history_str += f"{sender_label}: {msg.get('message', '')}\n"
+
+    prompt = f"""
+    Look at the attached screenshot of a LinkedIn conversation with {candidate_name}.
+
+    {"PRIOR TYPED THREAD LOG FOR CONTEXT (older messages, may overlap with the screenshot):" if history_str else ""}
+    {history_str}
+
+    Judge the conversation and return a JSON object with these fields:
+    - "verdict": one of "interested", "lukewarm", "vague", "not_interested". Use "interested" only when
+      they show real specificity or initiative (asking a follow-up question, offering to help, naming a
+      concrete next step). Use "vague" when they replied politely but generically, with nothing to act on.
+      Use "lukewarm" when it's positive but noncommittal. Use "not_interested" when they declined or the
+      tone clearly signals they don't want to continue.
+    - "reason": 1-2 sentences on specifically what in their reply led to that verdict. Quote or paraphrase
+      the actual telling detail, don't just restate the verdict.
+    - "recommended_action": one concrete next step in plain language (e.g. "Follow up in about a week with
+      a specific question about their work", "Let this one go, they were clear they're not interested",
+      "Reply now, they asked you a direct question", "Keep it warm, no urgency needed").
+
+    Return ONLY raw JSON. Do not include markdown code blocks or wrapper text.
+    """
+
+    contents = [prompt]
+    try:
+        import PIL.Image
+        img = PIL.Image.open(screenshot_path)
+        contents.append(img)
+    except Exception as e:
+        return {
+            "verdict": "vague",
+            "reason": f"Could not read the uploaded screenshot: {e}",
+            "recommended_action": "Try re-uploading the screenshot.",
+        }
+
+    try:
+        raw_output = _call_gemini(api_key, system_instruction, contents, json_mode=True)
+        cleaned_output = _strip_json_codeblock(raw_output)
+        data = json.loads(cleaned_output)
+        verdict = data.get("verdict", "vague")
+        if verdict not in ("interested", "lukewarm", "vague", "not_interested"):
+            verdict = "vague"
+        return {
+            "verdict": verdict,
+            "reason": clean_unicode_text(data.get("reason", "")),
+            "recommended_action": clean_unicode_text(data.get("recommended_action", "")),
+        }
+    except Exception as e:
+        return {
+            "verdict": "vague",
+            "reason": f"Analysis failed: {e}",
+            "recommended_action": "Try again, or judge this one manually.",
+        }

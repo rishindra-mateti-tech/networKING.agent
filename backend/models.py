@@ -85,6 +85,18 @@ class Connection(Base):
     context_summary = Column(Text, nullable=True)
     
     error_message = Column(Text, nullable=True)
+
+    # Timestamps for reply-time analytics. Set once, at the moment the status
+    # actually transitions, so later status changes (updated_at gets
+    # overwritten on every change) don't destroy the original timing signal.
+    sent_at = Column(DateTime, nullable=True)
+    replied_at = Column(DateTime, nullable=True)
+
+    # Conversation quality verdict from an uploaded chat screenshot
+    conversation_verdict = Column(String, nullable=True)          # 'interested', 'lukewarm', 'not_interested', 'vague'
+    conversation_verdict_reason = Column(Text, nullable=True)
+    conversation_recommended_action = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
@@ -132,6 +144,7 @@ class InteractionLog(Base):
     
     sender = Column(String, nullable=False)        # 'user' or 'connection'
     message = Column(Text, nullable=False)
+    screenshot_path = Column(String, nullable=True)  # optional uploaded conversation screenshot
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     # Relationships

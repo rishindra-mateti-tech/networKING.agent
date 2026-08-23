@@ -32,14 +32,46 @@ def _resolve_db_path() -> str:
     return os.path.join(os.path.dirname(__file__), "networking.db")
 
 
+# Columns added to `connections` after the table already existed in production.
+# Base.metadata.create_all only creates missing TABLES, not missing columns on
+# existing tables, so both SQLite and Postgres need this list kept up to date
+# whenever a new Column is added to models.py after initial release.
+_NEW_CONNECTION_COLUMNS = [
+    ("sent_at", "DATETIME", "TIMESTAMP"),
+    ("replied_at", "DATETIME", "TIMESTAMP"),
+    ("conversation_verdict", "TEXT", "TEXT"),
+    ("conversation_verdict_reason", "TEXT", "TEXT"),
+    ("conversation_recommended_action", "TEXT", "TEXT"),
+]
+_NEW_INTERACTION_LOG_COLUMNS = [
+    ("screenshot_path", "TEXT", "TEXT"),
+]
+
+
+def _run_postgres_migrations(database_url: str):
+    import psycopg2
+
+    conn = psycopg2.connect(database_url)
+    cursor = conn.cursor()
+    try:
+        for col_name, _sqlite_type, pg_type in _NEW_CONNECTION_COLUMNS:
+            cursor.execute(f"ALTER TABLE connections ADD COLUMN IF NOT EXISTS {col_name} {pg_type}")
+        for col_name, _sqlite_type, pg_type in _NEW_INTERACTION_LOG_COLUMNS:
+            cursor.execute(f"ALTER TABLE interaction_logs ADD COLUMN IF NOT EXISTS {col_name} {pg_type}")
+        conn.commit()
+        print("[MIGRATE] Postgres: verified/added new columns on connections and interaction_logs.")
+    except Exception as e:
+        print(f"[MIGRATE] Postgres migration error: {e}")
+        conn.rollback()
+    finally:
+        cursor.close()
+        conn.close()
+
+
 def run_migrations():
     database_url = os.getenv("DATABASE_URL", "")
     if database_url.startswith("postgres"):
-        # A fresh Postgres database gets the full current schema straight from
-        # the SQLAlchemy models (see Base.metadata.create_all in main.py) --
-        # the column-by-column ALTER TABLE dance below only exists to patch up
-        # SQLite files created before certain columns/encryption existed.
-        print("[MIGRATE] Postgres detected, skipping SQLite-specific column backfill.")
+        _run_postgres_migrations(database_url)
         return
 
     db_path = _resolve_db_path()
@@ -73,9 +105,9 @@ def run_migrations():
         ("generated_outreach_relationship", "TEXT"),
         ("generated_outreach_featured", "TEXT"),
         ("hiring_badge_status", "TEXT")
-    ]
+    ] + [(name, sqlite_type) for name, sqlite_type, _pg_type in _NEW_CONNECTION_COLUMNS]
 
-    
+
     for col_name, col_type in new_columns:
         if col_name not in existing_columns:
             print(f"Adding column '{col_name}' ({col_type}) to connections table...")
@@ -86,6 +118,17 @@ def run_migrations():
                 print(f"Error adding column '{col_name}': {e}")
         else:
             print(f"Column '{col_name}' already exists.")
+
+    cursor.execute("PRAGMA table_info(interaction_logs)")
+    existing_log_columns = [row[1] for row in cursor.fetchall()]
+    for col_name, sqlite_type, _pg_type in _NEW_INTERACTION_LOG_COLUMNS:
+        if col_name not in existing_log_columns:
+            print(f"Adding column '{col_name}' ({sqlite_type}) to interaction_logs table...")
+            try:
+                cursor.execute(f"ALTER TABLE interaction_logs ADD COLUMN {col_name} {sqlite_type}")
+                conn.commit()
+            except Exception as e:
+                print(f"Error adding column '{col_name}': {e}")
 
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='api_keys'")
     if cursor.fetchone():

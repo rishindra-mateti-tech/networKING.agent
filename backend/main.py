@@ -14,7 +14,7 @@ from database import engine, Base, get_db
 from auth import get_current_user, create_access_token, get_password_hash, verify_password
 from parser import parse_pdf_text, extract_linkedin_profile_metadata
 from orchestrator import QueueOrchestrator
-from generator import generate_thread_followup
+from generator import generate_thread_followup, analyze_conversation_screenshot
 from twin_agent import compile_twin_agent_profile
 
 from migrate import run_migrations
@@ -482,6 +482,13 @@ def update_connection_status(connection_id: int, payload: schemas.ConnectionUpda
         raise HTTPException(status_code=400, detail="Invalid status value")
         
     conn.status = payload.status
+    # Stamp the timestamp once, at the moment of transition -- updated_at gets
+    # overwritten by every later status change, so it can't be used for
+    # reply-time analytics the way these dedicated fields can.
+    if payload.status == "sent" and conn.sent_at is None:
+        conn.sent_at = datetime.datetime.utcnow()
+    if payload.status == "replied" and conn.replied_at is None:
+        conn.replied_at = datetime.datetime.utcnow()
     db.commit()
     db.refresh(conn)
     return conn
@@ -573,9 +580,76 @@ def create_interaction_log(connection_id: int, log_data: schemas.InteractionLogC
     # Auto-advance pipeline status when adding log replies
     if log_data.sender == "connection":
         conn.status = "replied"
+        if conn.replied_at is None:
+            conn.replied_at = datetime.datetime.utcnow()
     elif log_data.sender == "user" and conn.status == "replied":
         conn.status = "follow_up"
-        
+
+    db.commit()
+    db.refresh(new_log)
+    return new_log
+
+@app.post("/api/connections/{connection_id}/logs/upload-screenshot", response_model=schemas.InteractionLogOut)
+async def upload_conversation_screenshot(
+    connection_id: int,
+    file: UploadFile = File(...),
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Uploads a screenshot of a real conversation, logs it in the thread, and runs
+    a vision-based agent to judge how the conversation is actually going (genuinely
+    interested vs. politely vague vs. not interested), with a recommended next step.
+    """
+    conn = db.query(models.Connection).filter(models.Connection.id == connection_id, models.Connection.user_id == current_user.id).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    api_key_record = db.query(models.ApiKey).filter(
+        models.ApiKey.user_id == current_user.id,
+        models.ApiKey.is_active == True
+    ).first()
+    if not api_key_record:
+        raise HTTPException(status_code=400, detail="No active API key set for screenshot analysis.")
+
+    import uuid
+    ext = os.path.splitext(file.filename)[1] or ".png"
+    filename = f"{uuid.uuid4()}{ext}"
+    filepath = os.path.join(UPLOADS_DIR, filename)
+    try:
+        content = await file.read()
+        with open(filepath, "wb") as f:
+            f.write(content)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save screenshot: {str(e)}")
+
+    new_log = models.InteractionLog(
+        connection_id=connection_id,
+        user_id=current_user.id,
+        sender="connection",
+        message="[Conversation screenshot uploaded]",
+        screenshot_path=filepath
+    )
+    db.add(new_log)
+
+    logs = db.query(models.InteractionLog).filter(
+        models.InteractionLog.connection_id == connection_id
+    ).order_by(models.InteractionLog.created_at.asc()).all()
+    thread_history = [{"sender": l.sender, "message": l.message} for l in logs]
+
+    analysis = analyze_conversation_screenshot(
+        api_key=api_key_record.key_value,
+        candidate_name=conn.name,
+        screenshot_path=filepath,
+        thread_history=thread_history
+    )
+    conn.conversation_verdict = analysis["verdict"]
+    conn.conversation_verdict_reason = analysis["reason"]
+    conn.conversation_recommended_action = analysis["recommended_action"]
+    conn.status = "replied"
+    if conn.replied_at is None:
+        conn.replied_at = datetime.datetime.utcnow()
+
     db.commit()
     db.refresh(new_log)
     return new_log
@@ -634,5 +708,80 @@ def generate_followup_suggestion(
         thread_history=thread_history,
         user_intent=user_intent
     )
-    
+
     return {"suggested_reply": reply_text}
+
+
+# --- ANALYTICS ---
+
+@app.get("/api/analytics/overview")
+def get_analytics_overview(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Aggregate view over every outreach target: pipeline breakdown, seniority mix,
+    reply-time buckets, and a lightweight per-person list so the frontend can filter
+    by connection-count range, seniority, or experience without extra round trips.
+    """
+    import json as j
+
+    connections = db.query(models.Connection).filter(models.Connection.user_id == current_user.id).all()
+
+    by_status: dict = {}
+    by_seniority: dict = {}
+    experienced_10_plus = 0
+    reply_buckets = {"within_a_day": 0, "within_a_week": 0, "longer_than_a_week": 0, "no_reply_yet": 0}
+    people = []
+
+    now = datetime.datetime.utcnow()
+
+    for c in connections:
+        by_status[c.status] = by_status.get(c.status, 0) + 1
+
+        seniority = "Unknown"
+        try:
+            p_intel = j.loads(c.profile_intelligence or "{}")
+            seniority = p_intel.get("seniority") or "Unknown"
+        except Exception:
+            pass
+        by_seniority[seniority] = by_seniority.get(seniority, 0) + 1
+
+        if (c.years_experience or 0) >= 10:
+            experienced_10_plus += 1
+
+        if c.sent_at:
+            if c.replied_at:
+                delta = c.replied_at - c.sent_at
+                if delta.total_seconds() <= 86400:
+                    reply_buckets["within_a_day"] += 1
+                elif delta.total_seconds() <= 7 * 86400:
+                    reply_buckets["within_a_week"] += 1
+                else:
+                    reply_buckets["longer_than_a_week"] += 1
+            elif (now - c.sent_at).total_seconds() > 7 * 86400:
+                reply_buckets["no_reply_yet"] += 1
+
+        people.append({
+            "id": c.id,
+            "name": c.name,
+            "company": c.company,
+            "current_title": c.current_title,
+            "status": c.status,
+            "seniority": seniority,
+            "years_experience": c.years_experience,
+            "connection_count": c.connection_count,
+            "networking_score": c.networking_score,
+            "reply_probability": c.reply_probability,
+            "conversation_verdict": c.conversation_verdict,
+            "conversation_verdict_reason": c.conversation_verdict_reason,
+            "conversation_recommended_action": c.conversation_recommended_action,
+            "sent_at": c.sent_at,
+            "replied_at": c.replied_at,
+        })
+
+    return {
+        "total": len(connections),
+        "by_status": by_status,
+        "by_seniority": by_seniority,
+        "experienced_10_plus": experienced_10_plus,
+        "reply_time_buckets": reply_buckets,
+        "people": people,
+    }

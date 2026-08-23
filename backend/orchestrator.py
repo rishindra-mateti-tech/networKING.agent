@@ -300,15 +300,29 @@ class QueueOrchestrator:
                             screenshot_path=connection.screenshot_path
                         )
                         
-                        # Sync manually specified hiring_badge_status if set
-                        if connection.hiring_badge_status:
-                            try:
-                                import json as j
-                                p_intel = j.loads(bridge_data.get("profile_intelligence") or "{}")
+                        # Sync manually specified hiring_badge_status if set, and backfill
+                        # name/title/company from the AI's own extraction when the PDF
+                        # metadata heuristic (parser.py) failed to find them. Gemini reads
+                        # the same raw text with far more context than the regex heuristic,
+                        # so it often gets the name right even when the heuristic didn't.
+                        try:
+                            import json as j
+                            p_intel = j.loads(bridge_data.get("profile_intelligence") or "{}")
+                            if connection.hiring_badge_status:
                                 p_intel["hiring_badge_status"] = connection.hiring_badge_status
                                 bridge_data["profile_intelligence"] = j.dumps(p_intel)
-                            except Exception:
-                                pass
+
+                            ai_name = (p_intel.get("name") or "").strip()
+                            if ai_name and connection.name in (None, "", "Unknown Candidate"):
+                                connection.name = ai_name
+                            ai_title = (p_intel.get("title") or p_intel.get("role") or "").strip()
+                            if ai_title and not connection.current_title:
+                                connection.current_title = ai_title
+                            ai_company = (p_intel.get("company") or "").strip()
+                            if ai_company and not connection.company:
+                                connection.company = ai_company
+                        except Exception:
+                            pass
 
                         # Step B: Variants Generation in non-blocking thread
                         variants = await asyncio.to_thread(

@@ -1,10 +1,10 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { 
-  Users, User, Key, Settings, LogOut, Search, Plus, Star, Trash2, 
+import {
+  Users, User, Key, Settings, LogOut, Search, Plus, Star, Trash2,
   Send, RefreshCw, Check, Copy, Clipboard, FileText, ArrowRight, MessageSquare, AlertCircle,
-  Zap, Loader2, Menu, X
+  Zap, Loader2, Menu, X, BarChart3, ImagePlus
 } from "lucide-react";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -18,7 +18,7 @@ export default function Home() {
   const [authError, setAuthError] = useState("");
 
   // Global App State
-  const [currentView, setCurrentView] = useState<"pipeline" | "twinagent" | "apikeys" | "settings">("pipeline");
+  const [currentView, setCurrentView] = useState<"pipeline" | "twinagent" | "apikeys" | "settings" | "insights">("pipeline");
   const [connections, setConnections] = useState<any[]>([]);
   const [keys, setKeys] = useState<any[]>([]);
   const [settings, setSettings] = useState<any[]>([]);
@@ -97,6 +97,16 @@ export default function Home() {
   const [isBackendOffline, setIsBackendOffline] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
+  // Insights / Analytics
+  const [analyticsData, setAnalyticsData] = useState<any | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [connCountRangeFilter, setConnCountRangeFilter] = useState<string>("all");
+  const [seniorityFilter, setSeniorityFilter] = useState<string>("all");
+
+  // Conversation screenshot upload
+  const [screenshotUploadLoading, setScreenshotUploadLoading] = useState(false);
+  const conversationScreenshotInputRef = useRef<HTMLInputElement>(null);
+
   // Fetch helper with Authorization header
   const fetchWithAuth = async (path: string, options: RequestInit = {}) => {
     const currentToken = token || localStorage.getItem("token");
@@ -113,6 +123,14 @@ export default function Home() {
       throw err;
     }
   };
+
+  // Load analytics whenever the Insights tab is opened
+  useEffect(() => {
+    if (currentView === "insights" && token) {
+      fetchAnalytics();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentView, token]);
 
   // On Mount: Check LocalStorage for token
   useEffect(() => {
@@ -193,6 +211,21 @@ export default function Home() {
       }
     } catch (e) {
       // Quietly set offline status handled in fetchWithAuth
+    }
+  };
+
+  const fetchAnalytics = async () => {
+    setAnalyticsLoading(true);
+    try {
+      const res = await fetchWithAuth("/api/analytics/overview");
+      if (res?.ok) {
+        const data = await res.json();
+        setAnalyticsData(data);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setAnalyticsLoading(false);
     }
   };
 
@@ -645,6 +678,30 @@ export default function Home() {
     }
   };
 
+  const handleUploadConversationScreenshot = async (file: File) => {
+    if (!selectedConnection) return;
+    setScreenshotUploadLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetchWithAuth(`/api/connections/${selectedConnection.id}/logs/upload-screenshot`, {
+        method: "POST",
+        body: formData
+      });
+      if (res.ok) {
+        fetchThreadLogs(selectedConnection.id);
+        fetchConnections();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(data.detail || "Failed to analyze screenshot. Make sure you have an active API key configured.");
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setScreenshotUploadLoading(false);
+    }
+  };
+
   const handleGenerateReply = async () => {
     if (!selectedConnection) return;
     setIsGeneratingReply(true);
@@ -785,7 +842,7 @@ export default function Home() {
   }
 
   // --- SAAS DASHBOARD INTERFACE ---
-  const goToView = (view: "pipeline" | "twinagent" | "apikeys" | "settings") => {
+  const goToView = (view: "pipeline" | "twinagent" | "apikeys" | "settings" | "insights") => {
     setCurrentView(view);
     setSelectedConnection(null);
     setMobileNavOpen(false);
@@ -867,6 +924,15 @@ export default function Home() {
           >
             <Settings size={18} />
             <span>Notifications & Pacing</span>
+          </button>
+          <button
+            onClick={() => goToView("insights")}
+            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+              currentView === "insights" ? "bg-zinc-800 text-white font-semibold" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+            }`}
+          >
+            <BarChart3 size={18} />
+            <span>Insights</span>
           </button>
         </nav>
 
@@ -992,7 +1058,7 @@ export default function Home() {
                     </div>
 
                     {/* Column Items area */}
-                    <div className={`flex-1 overflow-y-auto space-y-3 rounded-xl border p-3 min-h-[400px] max-h-[70vh] transition-colors ${col.color}`}>
+                    <div className={`flex-1 overflow-y-auto space-y-3 rounded-xl border p-3 min-h-[120px] max-h-[70vh] transition-colors ${col.color}`}>
                       {colConnections.map(conn => (
                         <div 
                           key={conn.id}
@@ -1465,6 +1531,212 @@ export default function Home() {
           </div>
         )}
 
+        {/* VIEW E: INSIGHTS / ANALYTICS */}
+        {currentView === "insights" && (
+          <div className="p-4 sm:p-8 max-w-5xl w-full mx-auto space-y-6">
+            <div className="border-b border-zinc-800 pb-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-bold text-white">Insights</h2>
+                <p className="text-xs text-zinc-400 mt-1">
+                  Aggregate view across everyone you've added, so patterns show up without re-reading every card.
+                </p>
+              </div>
+              <button
+                onClick={fetchAnalytics}
+                className="text-xs bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 px-3 py-1.5 rounded text-zinc-300 hover:text-white transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
+              >
+                <RefreshCw size={12} className={analyticsLoading ? "animate-spin" : ""} />
+                <span>Refresh</span>
+              </button>
+            </div>
+
+            {!analyticsData && (
+              <div className="text-center py-16 text-xs text-zinc-500 font-mono">
+                {analyticsLoading ? "Loading insights..." : "No data yet."}
+              </div>
+            )}
+
+            {analyticsData && (() => {
+              const people: any[] = analyticsData.people || [];
+              const inRange = (cc: number | null) => {
+                const c = cc || 0;
+                if (connCountRangeFilter === "under_200") return c < 200;
+                if (connCountRangeFilter === "200_500") return c >= 200 && c <= 500;
+                if (connCountRangeFilter === "500_1000") return c > 500 && c <= 1000;
+                if (connCountRangeFilter === "1000_plus") return c > 1000;
+                return true;
+              };
+              const filteredPeople = people.filter(p =>
+                inRange(p.connection_count) &&
+                (seniorityFilter === "all" || p.seniority === seniorityFilter)
+              );
+              const replyBuckets = analyticsData.reply_time_buckets || {};
+              const bySeniority: Record<string, number> = analyticsData.by_seniority || {};
+              const byStatus: Record<string, number> = analyticsData.by_status || {};
+
+              return (
+                <>
+                  {/* Top stat tiles */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                      <span className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block">Total Outreach</span>
+                      <span className="text-2xl font-bold text-white">{analyticsData.total}</span>
+                    </div>
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                      <span className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block">Replied</span>
+                      <span className="text-2xl font-bold text-emerald-400">{byStatus["replied"] || 0}</span>
+                    </div>
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                      <span className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block">10+ Yrs Experience</span>
+                      <span className="text-2xl font-bold text-white">{analyticsData.experienced_10_plus}</span>
+                    </div>
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                      <span className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block">Recruiters Contacted</span>
+                      <span className="text-2xl font-bold text-white">{bySeniority["Recruiter"] || 0}</span>
+                    </div>
+                  </div>
+
+                  {/* Pipeline breakdown + Seniority breakdown */}
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                      <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-3">Pipeline Breakdown</h3>
+                      <div className="space-y-1.5">
+                        {Object.entries(byStatus).map(([status, count]) => (
+                          <div key={status} className="flex justify-between items-center text-xs">
+                            <span className="text-zinc-400 capitalize">{status.replace("_", " ")}</span>
+                            <span className="text-zinc-200 font-mono font-semibold">{count as number}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                      <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-3">Seniority Mix</h3>
+                      <div className="space-y-1.5">
+                        {Object.entries(bySeniority).map(([seniority, count]) => (
+                          <div key={seniority} className="flex justify-between items-center text-xs">
+                            <span className="text-zinc-400">{seniority}</span>
+                            <span className="text-zinc-200 font-mono font-semibold">{count as number}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Reply-time analysis */}
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                    <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-3">Reply-Time Analysis</h3>
+                    <p className="text-[10px] text-zinc-500 mb-3">
+                      Only counts connections marked "Sent" through the funnel stage selector, since that's what timestamps the clock start.
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div className="bg-zinc-950 border border-emerald-900/30 rounded-lg p-3 text-center">
+                        <span className="text-lg font-bold text-emerald-400 block">{replyBuckets.within_a_day || 0}</span>
+                        <span className="text-[9px] text-zinc-500 uppercase tracking-wider">Within a day</span>
+                      </div>
+                      <div className="bg-zinc-950 border border-amber-900/30 rounded-lg p-3 text-center">
+                        <span className="text-lg font-bold text-amber-400 block">{replyBuckets.within_a_week || 0}</span>
+                        <span className="text-[9px] text-zinc-500 uppercase tracking-wider">Within a week</span>
+                      </div>
+                      <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-center">
+                        <span className="text-lg font-bold text-zinc-300 block">{replyBuckets.longer_than_a_week || 0}</span>
+                        <span className="text-[9px] text-zinc-500 uppercase tracking-wider">Longer than a week</span>
+                      </div>
+                      <div className="bg-zinc-950 border border-rose-900/30 rounded-lg p-3 text-center">
+                        <span className="text-lg font-bold text-rose-400 block">{replyBuckets.no_reply_yet || 0}</span>
+                        <span className="text-[9px] text-zinc-500 uppercase tracking-wider">No reply, 7+ days</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Filterable people list */}
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                      <h3 className="text-xs font-bold text-white uppercase tracking-wider">Everyone ({filteredPeople.length})</h3>
+                      <div className="flex flex-wrap gap-2">
+                        <select
+                          value={connCountRangeFilter}
+                          onChange={e => setConnCountRangeFilter(e.target.value)}
+                          className="bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-[11px] text-zinc-300 focus:outline-none focus:border-zinc-700"
+                        >
+                          <option value="all">Any connection count</option>
+                          <option value="under_200">Under 200</option>
+                          <option value="200_500">200 to 500</option>
+                          <option value="500_1000">500 to 1000</option>
+                          <option value="1000_plus">1000+</option>
+                        </select>
+                        <select
+                          value={seniorityFilter}
+                          onChange={e => setSeniorityFilter(e.target.value)}
+                          className="bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-[11px] text-zinc-300 focus:outline-none focus:border-zinc-700"
+                        >
+                          <option value="all">Any seniority</option>
+                          {Object.keys(bySeniority).map(s => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b border-zinc-800 text-[10px] text-zinc-500 uppercase tracking-wider">
+                            <th className="text-left py-2 pr-3">Name</th>
+                            <th className="text-left py-2 pr-3">Company</th>
+                            <th className="text-left py-2 pr-3">Seniority</th>
+                            <th className="text-left py-2 pr-3">Connections</th>
+                            <th className="text-left py-2 pr-3">Status</th>
+                            <th className="text-left py-2 pr-3">Conversation Read</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredPeople.map(p => (
+                            <tr
+                              key={p.id}
+                              onClick={() => {
+                                const full = connections.find(c => c.id === p.id);
+                                if (full) setSelectedConnection(full);
+                              }}
+                              className="border-b border-zinc-900 hover:bg-zinc-950/60 cursor-pointer"
+                            >
+                              <td className="py-2 pr-3 text-zinc-200 font-medium">{p.name}</td>
+                              <td className="py-2 pr-3 text-zinc-400">{p.company || "-"}</td>
+                              <td className="py-2 pr-3 text-zinc-400">{p.seniority}</td>
+                              <td className="py-2 pr-3 text-zinc-400 font-mono">{p.connection_count ?? "-"}</td>
+                              <td className="py-2 pr-3 text-zinc-400 capitalize">{p.status.replace("_", " ")}</td>
+                              <td className="py-2 pr-3">
+                                {p.conversation_verdict ? (
+                                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                                    p.conversation_verdict === "interested" ? "bg-emerald-500/10 text-emerald-400" :
+                                    p.conversation_verdict === "lukewarm" ? "bg-amber-500/10 text-amber-400" :
+                                    p.conversation_verdict === "not_interested" ? "bg-rose-500/10 text-rose-400" :
+                                    "bg-zinc-800 text-zinc-400"
+                                  }`}>
+                                    {p.conversation_verdict.replace("_", " ")}
+                                  </span>
+                                ) : (
+                                  <span className="text-zinc-600">-</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                          {filteredPeople.length === 0 && (
+                            <tr>
+                              <td colSpan={6} className="text-center py-8 text-zinc-600 font-mono text-[10px]">
+                                No one matches this filter.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        )}
+
       </main>
 
       {/* 3. FLOATING DETAIL PANEL (Clicking Kanban Card Opens this sidebar) */}
@@ -1483,7 +1755,11 @@ export default function Home() {
                   <Star size={16} fill={selectedConnection.is_starred ? "currentColor" : "none"} />
                 </button>
               </div>
-              <p className="text-xs text-zinc-400 mt-1">{selectedConnection.current_title} • {selectedConnection.company}</p>
+              {(selectedConnection.current_title || selectedConnection.company) && (
+                <p className="text-xs text-zinc-400 mt-1">
+                  {[selectedConnection.current_title, selectedConnection.company].filter(Boolean).join(" • ")}
+                </p>
+              )}
               {selectedConnection.profile_url && (
                 <a 
                   href={selectedConnection.profile_url} 
@@ -1968,21 +2244,52 @@ export default function Home() {
                 Pasting responses here allows the follow-up generator to analyze thread history and suggest responses.
               </p>
 
+              {/* Conversation Quality Verdict, from the most recently analyzed screenshot */}
+              {selectedConnection.conversation_verdict && (
+                <div className={`rounded-lg p-3 border text-xs space-y-1 ${
+                  selectedConnection.conversation_verdict === "interested" ? "bg-emerald-950/20 border-emerald-900/30" :
+                  selectedConnection.conversation_verdict === "lukewarm" ? "bg-amber-950/20 border-amber-900/30" :
+                  selectedConnection.conversation_verdict === "not_interested" ? "bg-rose-950/20 border-rose-900/30" :
+                  "bg-zinc-900 border-zinc-800"
+                }`}>
+                  <span className={`text-[10px] font-bold uppercase tracking-wider ${
+                    selectedConnection.conversation_verdict === "interested" ? "text-emerald-400" :
+                    selectedConnection.conversation_verdict === "lukewarm" ? "text-amber-400" :
+                    selectedConnection.conversation_verdict === "not_interested" ? "text-rose-400" :
+                    "text-zinc-400"
+                  }`}>
+                    {selectedConnection.conversation_verdict.replace("_", " ")}
+                  </span>
+                  <p className="text-zinc-300">{selectedConnection.conversation_verdict_reason}</p>
+                  {selectedConnection.conversation_recommended_action && (
+                    <p className="text-zinc-400 italic">→ {selectedConnection.conversation_recommended_action}</p>
+                  )}
+                </div>
+              )}
+
               {/* History Messages */}
               <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
                 {threadLogs.map(log => (
-                  <div 
-                    key={log.id} 
+                  <div
+                    key={log.id}
                     className={`p-3 rounded-lg text-xs max-w-[85%] ${
-                      log.sender === "user" 
-                        ? "bg-zinc-900 border border-zinc-800 ml-auto" 
+                      log.sender === "user"
+                        ? "bg-zinc-900 border border-zinc-800 ml-auto"
                         : "bg-violet-950/20 border border-violet-900/30 mr-auto"
                     }`}
                   >
                     <span className="text-[9px] text-zinc-500 font-semibold block mb-1">
                       {log.sender === "user" ? "You" : selectedConnection.name}
                     </span>
-                    <p className="text-zinc-200">{log.message}</p>
+                    {log.screenshot_path ? (
+                      <img
+                        src={`${BACKEND_URL}/${log.screenshot_path}`}
+                        alt="Conversation screenshot"
+                        className="rounded-md max-h-48 object-contain border border-zinc-800"
+                      />
+                    ) : (
+                      <p className="text-zinc-200">{log.message}</p>
+                    )}
                   </div>
                 ))}
 
@@ -2021,7 +2328,7 @@ export default function Home() {
                       Me Sent
                     </button>
                   </div>
-                  <button 
+                  <button
                     onClick={handleAddThreadLog}
                     className="bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-300 hover:text-white px-3 py-1 text-[10px] rounded font-semibold transition-colors cursor-pointer"
                   >
@@ -2029,6 +2336,27 @@ export default function Home() {
                   </button>
                 </div>
               </div>
+
+              {/* Screenshot upload: has an AI agent read the actual conversation and judge how it's going */}
+              <input
+                type="file"
+                accept="image/*"
+                ref={conversationScreenshotInputRef}
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleUploadConversationScreenshot(file);
+                  e.target.value = "";
+                }}
+              />
+              <button
+                onClick={() => conversationScreenshotInputRef.current?.click()}
+                disabled={screenshotUploadLoading}
+                className="w-full flex items-center justify-center gap-2 bg-zinc-900 border border-dashed border-zinc-700 hover:border-zinc-600 text-zinc-400 hover:text-white px-3 py-2.5 text-[11px] rounded-lg font-semibold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <ImagePlus size={13} className={screenshotUploadLoading ? "animate-pulse" : ""} />
+                <span>{screenshotUploadLoading ? "Reading conversation..." : "Upload Conversation Screenshot for AI Read"}</span>
+              </button>
 
               {/* Follow-up reply generator */}
               <div className="pt-2 border-t border-zinc-800 space-y-3">
