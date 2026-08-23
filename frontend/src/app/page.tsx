@@ -88,6 +88,7 @@ export default function Home() {
   const [isTriggering, setIsTriggering] = useState(false);
   const [queueStatus, setQueueStatus] = useState<{pending: number, processing: number, completed: number, failed: number, active_keys: number} | null>(null);
   const [intelTab, setIntelTab] = useState<"profile" | "company" | "strategy" | "personalization">("profile");
+  const [showContextSummary, setShowContextSummary] = useState(false);
 
   // References
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -2359,68 +2360,80 @@ export default function Home() {
 
       </main>
 
-      {/* 3. FLOATING DETAIL PANEL (Clicking Kanban Card Opens this sidebar) */}
+      {/* 3. FULL-SCREEN DETAIL MODAL
+          Was a fixed 520px right-hand column, which forced everything into one
+          long vertical scroll. Now a wide modal with two columns, so reference
+          material sits beside the drafts and thread instead of far below them. */}
       {selectedConnection && (
-        <div className="fixed lg:static inset-0 lg:inset-auto w-full lg:w-[520px] border-l border-zinc-800 bg-zinc-900 lg:bg-zinc-900/90 backdrop-blur z-30 flex flex-col shrink-0">
-          
-          {/* Header */}
-          <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
-            <div>
+        <>
+          <div
+            onClick={() => setSelectedConnection(null)}
+            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-40"
+          />
+          <div className="fixed inset-3 sm:inset-6 lg:inset-10 z-50 bg-zinc-950/95 backdrop-blur-xl border border-white/10 rounded-2xl flex flex-col overflow-hidden shadow-2xl">
+
+          {/* Header: identity on the left, current stage on the right */}
+          <div className="px-5 py-4 border-b border-white/10 flex items-start justify-between gap-4 shrink-0">
+            <div className="min-w-0">
               <div className="flex items-center space-x-2">
-                <h2 className="text-base font-bold text-white">{selectedConnection.name}</h2>
-                <button 
+                <h2 className="text-base font-bold text-white truncate">{selectedConnection.name}</h2>
+                <button
                   onClick={() => handleToggleStar(selectedConnection.id)}
-                  className={`p-1 rounded hover:bg-zinc-800 ${selectedConnection.is_starred ? "text-amber-400" : "text-zinc-500"}`}
+                  className={`p-1 rounded hover:bg-white/10 shrink-0 ${selectedConnection.is_starred ? "text-amber-400" : "text-zinc-500"}`}
                 >
-                  <Star size={16} fill={selectedConnection.is_starred ? "currentColor" : "none"} />
+                  <Star size={15} fill={selectedConnection.is_starred ? "currentColor" : "none"} />
                 </button>
               </div>
               {(selectedConnection.current_title || selectedConnection.company) && (
-                <p className="text-xs text-zinc-400 mt-1">
+                <p className="text-xs text-zinc-400 mt-0.5 truncate">
                   {[selectedConnection.current_title, selectedConnection.company].filter(Boolean).join(" • ")}
                 </p>
               )}
               {selectedConnection.profile_url && (
-                <a 
-                  href={selectedConnection.profile_url} 
-                  target="_blank" 
+                <a
+                  href={selectedConnection.profile_url}
+                  target="_blank"
                   rel="noopener noreferrer"
-                  className="mt-2 inline-flex items-center space-x-1 text-[10px] text-zinc-400 hover:text-white font-semibold hover:underline bg-zinc-900 px-2 py-1 border border-zinc-800 rounded"
+                  className="mt-1.5 inline-flex items-center gap-1 text-[10px] text-zinc-400 hover:text-white font-semibold hover:underline"
                 >
-                  <span>View LinkedIn Profile ↗</span>
+                  View LinkedIn Profile <ExternalLink size={9} />
                 </a>
               )}
             </div>
-            
-            <button 
-              onClick={() => setSelectedConnection(null)}
-              className="text-xs text-zinc-500 hover:text-white px-3 py-1.5 border border-zinc-800 hover:border-zinc-700 bg-zinc-950/40 rounded transition-colors cursor-pointer"
-            >
-              Close
-            </button>
+
+            <div className="flex items-center gap-3 shrink-0">
+              {/* Funnel stage: current value visible, changed via one select
+                  instead of a seven-button grid taking a whole block */}
+              <div className="flex items-center gap-2">
+                <label className="text-[9px] text-zinc-500 font-semibold uppercase tracking-wider hidden sm:block">Stage</label>
+                <select
+                  value={selectedConnection.status}
+                  onChange={(e) => handleUpdateStatus(selectedConnection.id, e.target.value)}
+                  className="bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold text-zinc-200 focus:outline-none focus:border-white/25 cursor-pointer"
+                >
+                  {["pending", "processing", "completed", "sent", "replied", "follow_up", "interview", "closed"].map(st => (
+                    <option key={st} value={st} className="bg-zinc-900">
+                      {st === "completed" ? "Draft Ready"
+                        : st === "follow_up" ? "Follow Up"
+                        : st.charAt(0).toUpperCase() + st.slice(1)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                onClick={() => setSelectedConnection(null)}
+                className="p-2 rounded-lg text-zinc-500 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                aria-label="Close"
+              >
+                <X size={17} />
+              </button>
+            </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-6 space-y-6">
-            
-            {/* Stage Selector */}
-            <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4">
-              <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-2">Funnel Stage</label>
-              <div className="grid grid-cols-3 gap-2">
-                {["pending", "completed", "sent", "replied", "follow_up", "interview", "closed"].map(st => (
-                  <button
-                    key={st}
-                    onClick={() => handleUpdateStatus(selectedConnection.id, st)}
-                    className={`py-1.5 rounded text-[10px] font-mono font-semibold uppercase border transition-colors cursor-pointer ${
-                      selectedConnection.status === st
-                        ? "bg-zinc-800 text-white border-zinc-700 font-bold"
-                        : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200"
-                    }`}
-                  >
-                    {st === "completed" ? "Draft Ready" : st === "replied" ? "Replied" : st === "follow_up" ? "Follow Up" : st}
-                  </button>
-                ))}
-              </div>
-            </div>
+          <div className="flex-1 overflow-y-auto p-5 grid lg:grid-cols-12 gap-5 items-start content-start">
+
+            {/* LEFT COLUMN: reference material */}
+            <div className="lg:col-span-5 space-y-4">
 
             {/* Networking Intelligence Signals */}
             <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-4">
@@ -2534,13 +2547,21 @@ export default function Home() {
               )}
             </div>
 
-            {/* Context & Reasoning Summary */}
+            {/* Context & Reasoning Summary, collapsed by default to save height */}
             {selectedConnection.context_summary && (
-              <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-2">
-                <span className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block">Reasoning Context Summary</span>
-                <p className="text-xs text-zinc-200 bg-zinc-900 border border-zinc-800/80 rounded-lg p-3.5 leading-relaxed italic">
-                  "{selectedConnection.context_summary}"
-                </p>
+              <div className="bg-zinc-950 border border-zinc-800 rounded-xl overflow-hidden">
+                <button
+                  onClick={() => setShowContextSummary(v => !v)}
+                  className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-white/[0.02] transition-colors cursor-pointer"
+                >
+                  <span className="text-[10px] text-zinc-400 font-semibold uppercase tracking-wider">Reasoning Context Summary</span>
+                  {showContextSummary ? <ChevronDown size={13} className="text-zinc-500" /> : <ChevronRight size={13} className="text-zinc-500" />}
+                </button>
+                {showContextSummary && (
+                  <p className="text-xs text-zinc-300 px-4 pb-4 leading-relaxed italic">
+                    "{selectedConnection.context_summary}"
+                  </p>
+                )}
               </div>
             )}
 
@@ -2779,6 +2800,11 @@ export default function Home() {
               </div>
             )}
 
+            </div>
+
+            {/* RIGHT COLUMN: the things you actually act on */}
+            <div className="lg:col-span-7 space-y-4">
+
             {/* Generated Outreach Copy Variants */}
             {selectedConnection.generated_outreach_short && (
               <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-4">
@@ -3014,8 +3040,10 @@ export default function Home() {
               </div>
             </div>
 
+            </div>
           </div>
         </div>
+        </>
       )}
 
       {/* 4. ADD OUTREACH TARGET DIALOG MODAL */}

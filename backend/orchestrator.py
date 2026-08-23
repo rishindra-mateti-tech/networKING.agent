@@ -333,8 +333,7 @@ class QueueOrchestrator:
                             candidate_profile=connection.profile_text or "",
                             candidate_posts=connection.posts_text or "",
                             bridge_data=bridge_data,
-                            tone_examples=settings.get("tone_examples", ""),
-                            profile_url=connection.profile_url
+                            tone_examples=settings.get("tone_examples", "")
                         )
                         
                         # Save successful outreach

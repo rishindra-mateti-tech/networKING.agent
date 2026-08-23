@@ -468,7 +468,6 @@ def run_message_writing_agent(
     context_summary: str,
     twin_profile: str,
     tone_examples: str,
-    profile_url: Optional[str] = None
 ) -> dict:
     """
     Agent 5: Message Writing Agent
@@ -648,13 +647,10 @@ def run_message_writing_agent(
             val = clean_placeholders(clean_unicode_text(feat_match.group(1).strip()))
             variants["featured"] = val
 
-        # Append Profile URL link to each draft variant if available
-        if profile_url:
-            clean_url = profile_url.strip()
-            for key in ["referral", "coffee", "technical", "relationship", "featured", "short", "warm", "tech", "mixed"]:
-                if key in variants and not variants[key].startswith("Failed to"):
-                    variants[key] = f"{variants[key]}\n\nProfile Link: {clean_url}"
-
+        # Deliberately no profile link appended to the drafts. The notification
+        # already carries the URL once at the top, and these drafts get pasted
+        # straight into a LinkedIn DM to this person, where linking them to
+        # their own profile makes no sense.
         return variants
     except Exception as e:
         print(f"Error generating variants: {e}")
@@ -707,7 +703,7 @@ def analyze_candidate_bridge(api_key: str, twin_profile: str, candidate_name: st
     }
 
 
-def generate_outreach_variants(api_key: str, twin_profile: str, candidate_name: str, candidate_profile: str, candidate_posts: str, bridge_data: dict, tone_examples: str = "", profile_url: Optional[str] = None) -> dict:
+def generate_outreach_variants(api_key: str, twin_profile: str, candidate_name: str, candidate_profile: str, candidate_posts: str, bridge_data: dict, tone_examples: str = "") -> dict:
     """
     Stage 2: Message Writing Agent.
     Runs the writing agent using synthesized intermediate outputs.
@@ -728,7 +724,6 @@ def generate_outreach_variants(api_key: str, twin_profile: str, candidate_name: 
         context_summary=context_summary,
         twin_profile=twin_profile,
         tone_examples=tone_examples,
-        profile_url=profile_url
     )
 
 
