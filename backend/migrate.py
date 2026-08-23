@@ -42,6 +42,10 @@ _NEW_CONNECTION_COLUMNS = [
     ("conversation_verdict", "TEXT", "TEXT"),
     ("conversation_verdict_reason", "TEXT", "TEXT"),
     ("conversation_recommended_action", "TEXT", "TEXT"),
+    ("pdf_filename", "TEXT", "TEXT"),
+    ("candidate_email", "TEXT", "TEXT"),
+    ("generated_email_subject", "TEXT", "TEXT"),
+    ("generated_email_body", "TEXT", "TEXT"),
 ]
 _NEW_INTERACTION_LOG_COLUMNS = [
     ("screenshot_path", "TEXT", "TEXT"),

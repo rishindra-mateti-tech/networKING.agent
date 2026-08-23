@@ -88,8 +88,19 @@ def extract_linkedin_profile_metadata(pdf_text: str) -> dict:
         "location": None,
         "connection_count": 500,  # Default
         "years_experience": 0.0,
-        "profile_url": None
+        "profile_url": None,
+        "email": None
     }
+
+    # Extract a contact email if the profile exposes one. LinkedIn PDF exports
+    # put this in the Contact block near the top when the person has made it
+    # visible. Skip linkedin.com addresses, those are never the person's email.
+    email_matches = re.findall(r'[\w.+-]+@[\w-]+\.[\w.-]+', pdf_text)
+    for candidate_email in email_matches:
+        cleaned = candidate_email.strip().rstrip('.,;')
+        if "linkedin.com" not in cleaned.lower():
+            metadata["email"] = cleaned
+            break
 
     # Extract LinkedIn URL if present in PDF
     linkedin_url_match = re.search(
@@ -166,15 +177,32 @@ def extract_linkedin_profile_metadata(pdf_text: str) -> dict:
     # ---- Extract headline/title and company ----
     # Look at lines after the name, before the first section header
     headline_lines = []
-    for line in lines[name_line_idx + 1: name_line_idx + 6]:
-        if is_section_header(line):
-            break
+    for line in lines[name_line_idx + 1: name_line_idx + 8]:
+        # NOTE: the skip checks below must run BEFORE the section-header break.
+        # A profile URL line contains "linkedin.com", which is also a
+        # section-header keyword, so testing for the header first would abort
+        # the whole scan on the contact block and never reach the real headline
+        # sitting one line further down.
+
         # Skip lines that look like URLs or email addresses
-        if "@" in line or "linkedin.com" in line.lower():
+        if "@" in line or "linkedin.com" in line.lower() or line.lower().startswith("www."):
             continue
         # Skip lines that are just numbers (connection counts, etc.)
         if re.match(r"^\d+\s*(connections?|followers?)?$", line, re.IGNORECASE):
             continue
+        # Skip phone numbers. LinkedIn's Contact block lists these right under
+        # the name, and without this they get mistaken for the job headline
+        # (e.g. a card showing "+1213... (Mobile)" where the title should be).
+        if re.search(r'(\+?\d[\d\s().-]{7,}\d)', line):
+            continue
+        if re.search(r'\b(mobile|phone|tel|cell)\b', line, re.IGNORECASE):
+            continue
+
+        # A genuine section header (Experience, Education, ...) means the
+        # headline block is over.
+        if is_section_header(line):
+            break
+
         headline_lines.append(line)
 
     if headline_lines:

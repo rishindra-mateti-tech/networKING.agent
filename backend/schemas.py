@@ -94,6 +94,10 @@ class ConnectionOut(BaseModel):
     error_message: Optional[str] = None
     sent_at: Optional[datetime] = None
     replied_at: Optional[datetime] = None
+    pdf_filename: Optional[str] = None
+    candidate_email: Optional[str] = None
+    generated_email_subject: Optional[str] = None
+    generated_email_body: Optional[str] = None
     conversation_verdict: Optional[str] = None
     conversation_verdict_reason: Optional[str] = None
     conversation_recommended_action: Optional[str] = None
@@ -128,6 +132,9 @@ class SettingCreate(BaseModel):
 
 class SettingUpdateBatch(BaseModel):
     settings: List[SettingCreate]
+
+class AnalyticsQuestion(BaseModel):
+    question: str
 
 class SettingOut(BaseModel):
     id: int

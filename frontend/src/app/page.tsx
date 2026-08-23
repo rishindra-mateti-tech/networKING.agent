@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   Users, User, Key, Settings, LogOut, Search, Plus, Star, Trash2,
   Send, RefreshCw, Check, Copy, Clipboard, FileText, ArrowRight, MessageSquare, AlertCircle,
-  Zap, Loader2, Menu, X, BarChart3, ImagePlus
+  Zap, Loader2, Menu, X, BarChart3, ImagePlus, Sparkles, Mail, ExternalLink, ChevronDown, ChevronRight
 } from "lucide-react";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -18,7 +18,7 @@ export default function Home() {
   const [authError, setAuthError] = useState("");
 
   // Global App State
-  const [currentView, setCurrentView] = useState<"pipeline" | "twinagent" | "apikeys" | "settings" | "insights">("pipeline");
+  const [currentView, setCurrentView] = useState<"pipeline" | "twinagent" | "apikeys" | "settings" | "insights" | "uploads">("pipeline");
   const [connections, setConnections] = useState<any[]>([]);
   const [keys, setKeys] = useState<any[]>([]);
   const [settings, setSettings] = useState<any[]>([]);
@@ -106,6 +106,20 @@ export default function Home() {
   // Conversation screenshot upload
   const [screenshotUploadLoading, setScreenshotUploadLoading] = useState(false);
   const conversationScreenshotInputRef = useRef<HTMLInputElement>(null);
+
+  // Ask-the-data analytics (available from every main page)
+  const [analyticsQuestion, setAnalyticsQuestion] = useState("");
+  const [analyticsAnswer, setAnalyticsAnswer] = useState("");
+  const [analyticsAsking, setAnalyticsAsking] = useState(false);
+  const [showAnalyticsPanel, setShowAnalyticsPanel] = useState(false);
+
+  // Email drafting
+  const [emailClientPreference, setEmailClientPreference] = useState("gmail");
+  const [emailDraftLoadingId, setEmailDraftLoadingId] = useState<number | null>(null);
+  const [expandedUploadRow, setExpandedUploadRow] = useState<number | null>(null);
+  const [uploadsRowScreenshotLoadingId, setUploadsRowScreenshotLoadingId] = useState<number | null>(null);
+  const uploadsScreenshotInputRef = useRef<HTMLInputElement>(null);
+  const [uploadsScreenshotTargetId, setUploadsScreenshotTargetId] = useState<number | null>(null);
 
   // Fetch helper with Authorization header
   const fetchWithAuth = async (path: string, options: RequestInit = {}) => {
@@ -272,6 +286,7 @@ export default function Home() {
         setTelegramToken(mapped["telegram_token"] || "");
         setTelegramChatId(mapped["telegram_chat_id"] || "");
         setSlackWebhookUrl(mapped["slack_webhook_url"] || "");
+        setEmailClientPreference(mapped["email_client_preference"] || "gmail");
         setPacingInterval(mapped["pacing_interval_minutes"] || "15");
       }
     } catch (e) {
@@ -343,6 +358,7 @@ export default function Home() {
         { key: "telegram_token", value: telegramToken },
         { key: "telegram_chat_id", value: telegramChatId },
         { key: "slack_webhook_url", value: slackWebhookUrl },
+        { key: "email_client_preference", value: emailClientPreference },
         { key: "pacing_interval_minutes", value: pacingInterval }
       ]
     };
@@ -702,6 +718,84 @@ export default function Home() {
     }
   };
 
+  const handleAskAnalytics = async () => {
+    if (!analyticsQuestion.trim()) return;
+    setAnalyticsAsking(true);
+    setAnalyticsAnswer("");
+    try {
+      const res = await fetchWithAuth("/api/analytics/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: analyticsQuestion })
+      });
+      const data = await res.json();
+      setAnalyticsAnswer(res.ok ? data.answer : (data.detail || "Failed to analyze."));
+    } catch (e: any) {
+      setAnalyticsAnswer(e.message || "Network error.");
+    } finally {
+      setAnalyticsAsking(false);
+    }
+  };
+
+  const handleGenerateEmail = async (connId: number) => {
+    setEmailDraftLoadingId(connId);
+    try {
+      const res = await fetchWithAuth(`/api/connections/${connId}/generate-email`, { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        fetchConnections();
+        setExpandedUploadRow(connId);
+      } else {
+        alert(data.detail || "Failed to generate email.");
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setEmailDraftLoadingId(null);
+    }
+  };
+
+  // Hands the finished draft off to whichever mail client the user prefers, with
+  // the recipient, subject and body pre-filled so it opens as a reviewable draft
+  // rather than anything being sent automatically.
+  const openEmailClient = (conn: any) => {
+    const to = encodeURIComponent(conn.candidate_email || "");
+    const subject = encodeURIComponent(conn.generated_email_subject || "");
+    const body = encodeURIComponent(conn.generated_email_body || "");
+    let url = "";
+    if (emailClientPreference === "gmail") {
+      url = `https://mail.google.com/mail/?view=cm&fs=1&to=${to}&su=${subject}&body=${body}`;
+    } else if (emailClientPreference === "outlook") {
+      url = `https://outlook.office.com/mail/deeplink/compose?to=${to}&subject=${subject}&body=${body}`;
+    } else {
+      url = `mailto:${conn.candidate_email || ""}?subject=${subject}&body=${body}`;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const handleUploadScreenshotForRow = async (connId: number, file: File) => {
+    setUploadsRowScreenshotLoadingId(connId);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetchWithAuth(`/api/connections/${connId}/logs/upload-screenshot`, {
+        method: "POST",
+        body: formData
+      });
+      if (res.ok) {
+        fetchConnections();
+        if (selectedConnection?.id === connId) fetchThreadLogs(connId);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(data.detail || "Failed to analyze screenshot.");
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setUploadsRowScreenshotLoadingId(null);
+    }
+  };
+
   const handleGenerateReply = async () => {
     if (!selectedConnection) return;
     setIsGeneratingReply(true);
@@ -747,12 +841,15 @@ export default function Home() {
 
   // Kanban Pipeline Columns mapping
   const columns = [
-    { title: "Pending", statusKeys: ["pending", "failed"], color: "border-zinc-700 bg-zinc-900/40 text-zinc-400" },
-    { title: "Processing", statusKeys: ["processing"], color: "border-amber-500/50 bg-amber-950/10 text-amber-400 animate-pulse" },
-    { title: "Draft Ready", statusKeys: ["completed"], color: "border-zinc-800 bg-zinc-900/20 text-zinc-300" },
-    { title: "Sent", statusKeys: ["sent"], color: "border-blue-500/50 bg-blue-950/10 text-blue-400" },
-    { title: "Replied / Chatting", statusKeys: ["replied", "follow_up"], color: "border-emerald-500/50 bg-emerald-950/10 text-emerald-400" },
-    { title: "Funnel Closed", statusKeys: ["interview", "closed"], color: "border-zinc-500 bg-zinc-800/40 text-zinc-300" }
+    // One consistent surface for every column. Status is signalled by the small
+    // count pill and the card contents, not by giving each column its own border
+    // colour, which read as noisy and unconsidered.
+    { title: "Pending", statusKeys: ["pending", "failed"], color: "border-white/10 bg-white/[0.02]" },
+    { title: "Processing", statusKeys: ["processing"], color: "border-white/10 bg-white/[0.02]" },
+    { title: "Draft Ready", statusKeys: ["completed"], color: "border-white/10 bg-white/[0.02]" },
+    { title: "Sent", statusKeys: ["sent"], color: "border-white/10 bg-white/[0.02]" },
+    { title: "Replied / Chatting", statusKeys: ["replied", "follow_up"], color: "border-white/10 bg-white/[0.02]" },
+    { title: "Funnel Closed", statusKeys: ["interview", "closed"], color: "border-white/10 bg-white/[0.02]" }
   ];
 
   // Filtering connections list
@@ -842,11 +939,74 @@ export default function Home() {
   }
 
   // --- SAAS DASHBOARD INTERFACE ---
-  const goToView = (view: "pipeline" | "twinagent" | "apikeys" | "settings" | "insights") => {
+  const goToView = (view: "pipeline" | "twinagent" | "apikeys" | "settings" | "insights" | "uploads") => {
     setCurrentView(view);
     setSelectedConnection(null);
     setMobileNavOpen(false);
   };
+
+  // Shared across the three main pages. Lets the user interrogate their own
+  // outreach data in plain language, answered by their own Gemini keys.
+  const renderAnalyticsPanel = () => (
+    <div className="bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-xl overflow-hidden">
+      <button
+        onClick={() => setShowAnalyticsPanel(v => !v)}
+        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-white/[0.02] transition-colors cursor-pointer"
+      >
+        <span className="flex items-center gap-2 text-xs font-bold text-white uppercase tracking-wider">
+          <Sparkles size={14} className="text-[#4d8565]" />
+          View Analytics
+        </span>
+        <span className="text-[10px] text-zinc-500 font-mono">{showAnalyticsPanel ? "hide" : "ask anything"}</span>
+      </button>
+
+      {showAnalyticsPanel && (
+        <div className="px-4 pb-4 space-y-3 border-t border-white/5 pt-3">
+          <p className="text-[10px] text-zinc-500">
+            Ask about your own outreach in plain language. Runs on your configured Gemini keys.
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {[
+              "Which type of person replies to me most?",
+              "Who should I follow up with first?",
+              "Why is my reply rate low?",
+              "Which companies ignored me?",
+            ].map(q => (
+              <button
+                key={q}
+                onClick={() => setAnalyticsQuestion(q)}
+                className="text-[10px] bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-400 hover:text-white px-2 py-1 rounded-full transition-colors cursor-pointer"
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={analyticsQuestion}
+              onChange={e => setAnalyticsQuestion(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") handleAskAnalytics(); }}
+              placeholder="e.g. which seniority level actually replies to me?"
+              className="flex-1 bg-zinc-950/60 border border-white/10 rounded-lg px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-white/20"
+            />
+            <button
+              onClick={handleAskAnalytics}
+              disabled={analyticsAsking || !analyticsQuestion.trim()}
+              className="bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-300 hover:text-white px-4 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer disabled:opacity-40 shrink-0"
+            >
+              {analyticsAsking ? <Loader2 size={13} className="animate-spin" /> : "Ask"}
+            </button>
+          </div>
+          {analyticsAnswer && (
+            <div className="bg-zinc-950/60 border border-white/10 rounded-lg p-3 text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap">
+              {analyticsAnswer}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-200 flex">
@@ -881,7 +1041,7 @@ export default function Home() {
           </button>
         </div>
 
-        <nav className="flex-1 p-4 space-y-1">
+        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
           <button
             onClick={() => goToView("pipeline")}
             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
@@ -889,8 +1049,38 @@ export default function Home() {
             }`}
           >
             <Users size={18} />
-            <span>Outreach Pipeline</span>
+            <span>Outreach Target</span>
           </button>
+          <button
+            onClick={() => goToView("uploads")}
+            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+              currentView === "uploads" ? "bg-zinc-800 text-white font-semibold" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+            }`}
+          >
+            <FileText size={18} />
+            <div className="flex-1 flex items-center justify-between">
+              <span>Uploads</span>
+              {connections.length > 0 && (
+                <span className="text-[10px] bg-white/5 text-zinc-400 border border-white/10 px-1.5 py-0.5 rounded-full font-mono">
+                  {connections.length}
+                </span>
+              )}
+            </div>
+          </button>
+          <button
+            onClick={() => goToView("insights")}
+            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+              currentView === "insights" ? "bg-zinc-800 text-white font-semibold" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+            }`}
+          >
+            <BarChart3 size={18} />
+            <span>Dashboard</span>
+          </button>
+
+          <div className="pt-4 mt-2 border-t border-white/5">
+            <span className="px-4 text-[9px] font-semibold text-zinc-600 uppercase tracking-wider">Configuration</span>
+          </div>
+
           <button
             onClick={() => goToView("twinagent")}
             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
@@ -924,15 +1114,6 @@ export default function Home() {
           >
             <Settings size={18} />
             <span>Notifications & Pacing</span>
-          </button>
-          <button
-            onClick={() => goToView("insights")}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-              currentView === "insights" ? "bg-zinc-800 text-white font-semibold" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
-            }`}
-          >
-            <BarChart3 size={18} />
-            <span>Insights</span>
           </button>
         </nav>
 
@@ -1041,6 +1222,10 @@ export default function Home() {
             </div>
 
             {/* Kanban columns content */}
+            <div className="px-6 pt-4">
+              {renderAnalyticsPanel()}
+            </div>
+
             <div className="flex-1 p-6 overflow-x-auto flex gap-6 items-start">
               {columns.map(col => {
                 const colConnections = filteredConnections.filter(c => col.statusKeys.includes(c.status));
@@ -1127,6 +1312,273 @@ export default function Home() {
                   </div>
                 );
               })}
+            </div>
+          </div>
+        )}
+
+        {/* VIEW F: UPLOADS TABLE */}
+        {currentView === "uploads" && (
+          <div className="p-4 sm:p-6 w-full space-y-4">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <h2 className="text-2xl font-bold text-white">Uploads</h2>
+                <p className="text-xs text-zinc-400 mt-1">
+                  Every profile you've fed in, what came out of it, and what to do next.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    placeholder="Search..."
+                    className="bg-zinc-950/60 border border-white/10 rounded-lg pl-8 pr-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-white/20 w-44"
+                  />
+                </div>
+                <button
+                  onClick={() => setShowAddModal(true)}
+                  className="bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-300 hover:text-white px-3 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
+                >
+                  <Plus size={13} /> Add
+                </button>
+              </div>
+            </div>
+
+            {renderAnalyticsPanel()}
+
+            {/* Hidden input reused by every row's screenshot button */}
+            <input
+              type="file"
+              accept="image/*"
+              ref={uploadsScreenshotInputRef}
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file && uploadsScreenshotTargetId != null) {
+                  handleUploadScreenshotForRow(uploadsScreenshotTargetId, file);
+                }
+                e.target.value = "";
+              }}
+            />
+
+            <div className="bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-xl overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-white/10 text-[10px] text-zinc-500 uppercase tracking-wider bg-white/[0.02]">
+                      <th className="text-left py-2.5 px-3 font-semibold w-8"></th>
+                      <th className="text-left py-2.5 px-3 font-semibold">PDF</th>
+                      <th className="text-left py-2.5 px-3 font-semibold">Name</th>
+                      <th className="text-left py-2.5 px-3 font-semibold">Company</th>
+                      <th className="text-left py-2.5 px-3 font-semibold">Exp</th>
+                      <th className="text-left py-2.5 px-3 font-semibold">Replied</th>
+                      <th className="text-left py-2.5 px-3 font-semibold">Email</th>
+                      <th className="text-left py-2.5 px-3 font-semibold">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredConnections.map(conn => {
+                      const isExpanded = expandedUploadRow === conn.id;
+                      const hasReplied = !!conn.replied_at || ["replied", "follow_up", "interview"].includes(conn.status);
+                      return (
+                        <React.Fragment key={conn.id}>
+                          <tr className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+                            <td className="py-2 px-3">
+                              <button
+                                onClick={() => setExpandedUploadRow(isExpanded ? null : conn.id)}
+                                className="text-zinc-500 hover:text-white cursor-pointer"
+                                aria-label={isExpanded ? "Collapse" : "Expand"}
+                              >
+                                {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                              </button>
+                            </td>
+                            <td className="py-2 px-3 text-zinc-500 font-mono text-[10px] max-w-[140px] truncate" title={conn.pdf_filename || ""}>
+                              {conn.pdf_filename || "manual entry"}
+                            </td>
+                            <td className="py-2 px-3">
+                              {conn.profile_url ? (
+                                <a
+                                  href={conn.profile_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-zinc-100 font-medium hover:text-[#4d8565] hover:underline inline-flex items-center gap-1"
+                                >
+                                  {conn.name}
+                                  <ExternalLink size={10} className="opacity-50" />
+                                </a>
+                              ) : (
+                                <span className="text-zinc-100 font-medium">{conn.name}</span>
+                              )}
+                              {conn.current_title && (
+                                <span className="block text-[10px] text-zinc-500 truncate max-w-[180px]">{conn.current_title}</span>
+                              )}
+                            </td>
+                            <td className="py-2 px-3 text-zinc-400">{conn.company || "-"}</td>
+                            <td className="py-2 px-3 text-zinc-400 font-mono">
+                              {conn.years_experience ? `${conn.years_experience}y` : "-"}
+                            </td>
+                            <td className="py-2 px-3">
+                              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                                hasReplied ? "bg-[#4d8565]/15 text-[#7fb894]" : "bg-white/5 text-zinc-500"
+                              }`}>
+                                {hasReplied ? "Yes" : "No"}
+                              </span>
+                              {conn.conversation_verdict && (
+                                <span className="block text-[9px] text-zinc-500 mt-0.5 capitalize">
+                                  {conn.conversation_verdict.replace("_", " ")}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2 px-3 max-w-[160px]">
+                              {conn.candidate_email ? (
+                                <span className="text-zinc-400 font-mono text-[10px] truncate block" title={conn.candidate_email}>
+                                  {conn.candidate_email}
+                                </span>
+                              ) : (
+                                <span className="text-zinc-600">none found</span>
+                              )}
+                            </td>
+                            <td className="py-2 px-3">
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  onClick={() => {
+                                    setUploadsScreenshotTargetId(conn.id);
+                                    uploadsScreenshotInputRef.current?.click();
+                                  }}
+                                  disabled={uploadsRowScreenshotLoadingId === conn.id}
+                                  title="Upload a conversation screenshot"
+                                  className="p-1.5 rounded bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-400 hover:text-white transition-colors cursor-pointer disabled:opacity-40"
+                                >
+                                  {uploadsRowScreenshotLoadingId === conn.id
+                                    ? <Loader2 size={12} className="animate-spin" />
+                                    : <ImagePlus size={12} />}
+                                </button>
+                                {conn.candidate_email && (
+                                  <button
+                                    onClick={() => handleGenerateEmail(conn.id)}
+                                    disabled={emailDraftLoadingId === conn.id}
+                                    title="Draft an outreach email"
+                                    className="p-1.5 rounded bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-400 hover:text-white transition-colors cursor-pointer disabled:opacity-40"
+                                  >
+                                    {emailDraftLoadingId === conn.id
+                                      ? <Loader2 size={12} className="animate-spin" />
+                                      : <Mail size={12} />}
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => setSelectedConnection(conn)}
+                                  title="Open full detail panel"
+                                  className="p-1.5 rounded bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                                >
+                                  <ArrowRight size={12} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+
+                          {isExpanded && (
+                            <tr className="bg-zinc-950/40">
+                              <td colSpan={8} className="px-3 py-4">
+                                <div className="space-y-3">
+                                  {/* Email draft */}
+                                  {conn.generated_email_body && (
+                                    <div className="bg-zinc-950/60 border border-white/10 rounded-lg p-3">
+                                      <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+                                        <span className="text-[10px] font-bold text-white uppercase tracking-wider">Email Draft</span>
+                                        <div className="flex gap-1.5">
+                                          <button
+                                            onClick={() => handleCopyClipboard(
+                                              `Subject: ${conn.generated_email_subject}\n\n${conn.generated_email_body}`
+                                            )}
+                                            className="text-[10px] bg-white/5 hover:bg-white/10 border border-white/10 px-2 py-1 rounded text-zinc-300 hover:text-white transition-colors cursor-pointer flex items-center gap-1"
+                                          >
+                                            <Copy size={10} /> Copy
+                                          </button>
+                                          <button
+                                            onClick={() => openEmailClient(conn)}
+                                            className="text-[10px] bg-[#4d8565]/15 hover:bg-[#4d8565]/25 border border-[#4d8565]/30 px-2 py-1 rounded text-[#7fb894] transition-colors cursor-pointer flex items-center gap-1"
+                                          >
+                                            <Mail size={10} /> Open in {emailClientPreference === "outlook" ? "Outlook" : emailClientPreference === "gmail" ? "Gmail" : "mail app"}
+                                          </button>
+                                          <button
+                                            onClick={() => handleGenerateEmail(conn.id)}
+                                            disabled={emailDraftLoadingId === conn.id}
+                                            className="text-[10px] bg-white/5 hover:bg-white/10 border border-white/10 px-2 py-1 rounded text-zinc-300 hover:text-white transition-colors cursor-pointer disabled:opacity-40 flex items-center gap-1"
+                                          >
+                                            <RefreshCw size={10} className={emailDraftLoadingId === conn.id ? "animate-spin" : ""} /> Redraft
+                                          </button>
+                                        </div>
+                                      </div>
+                                      <p className="text-[11px] text-zinc-400 font-mono mb-1.5">
+                                        <span className="text-zinc-600">Subject:</span> {conn.generated_email_subject}
+                                      </p>
+                                      <pre className="text-[11px] text-zinc-300 whitespace-pre-wrap font-sans leading-relaxed">
+                                        {conn.generated_email_body}
+                                      </pre>
+                                    </div>
+                                  )}
+
+                                  {/* LinkedIn DM drafts, compact and copy-pasteable */}
+                                  {conn.generated_outreach_referral && (
+                                    <div className="grid sm:grid-cols-2 gap-2">
+                                      {[
+                                        { label: "Referral", text: conn.generated_outreach_referral },
+                                        { label: "Coffee Chat", text: conn.generated_outreach_coffee },
+                                        { label: "Technical", text: conn.generated_outreach_technical },
+                                        { label: "Relationship", text: conn.generated_outreach_relationship },
+                                        { label: "Featured", text: conn.generated_outreach_featured },
+                                      ].filter(d => d.text).map(d => (
+                                        <div key={d.label} className="bg-zinc-950/60 border border-white/10 rounded-lg p-2.5">
+                                          <div className="flex items-center justify-between mb-1">
+                                            <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider">{d.label}</span>
+                                            <button
+                                              onClick={() => handleCopyClipboard(d.text)}
+                                              className="text-zinc-500 hover:text-white transition-colors cursor-pointer"
+                                              title="Copy"
+                                            >
+                                              <Copy size={10} />
+                                            </button>
+                                          </div>
+                                          <p className="text-[10px] text-zinc-400 leading-relaxed line-clamp-4 whitespace-pre-wrap">{d.text}</p>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  {conn.conversation_verdict_reason && (
+                                    <div className="bg-zinc-950/60 border border-white/10 rounded-lg p-3">
+                                      <span className="text-[10px] font-bold text-white uppercase tracking-wider block mb-1">Conversation Read</span>
+                                      <p className="text-[11px] text-zinc-400">{conn.conversation_verdict_reason}</p>
+                                      {conn.conversation_recommended_action && (
+                                        <p className="text-[11px] text-zinc-300 italic mt-1">→ {conn.conversation_recommended_action}</p>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {!conn.generated_email_body && !conn.generated_outreach_referral && (
+                                    <p className="text-[10px] text-zinc-600 font-mono">
+                                      Nothing generated yet. This profile may still be in the queue.
+                                    </p>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                    {filteredConnections.length === 0 && (
+                      <tr>
+                        <td colSpan={8} className="text-center py-12 text-zinc-600 font-mono text-[11px]">
+                          No uploads yet. Add a profile from the Outreach Target page.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
@@ -1463,6 +1915,38 @@ export default function Home() {
 
               <hr className="border-zinc-800" />
 
+              {/* Email client preference */}
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-white flex items-center space-x-2">
+                  <Mail size={16} className="text-zinc-400" />
+                  <span>Email Client</span>
+                </h3>
+                <p className="text-xs text-zinc-400">
+                  Where "Open in..." sends your generated email drafts. Nothing is ever sent automatically, the draft opens for you to review first.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { val: "gmail", label: "Gmail" },
+                    { val: "outlook", label: "Outlook" },
+                    { val: "default", label: "System default" },
+                  ].map(opt => (
+                    <button
+                      key={opt.val}
+                      onClick={() => setEmailClientPreference(opt.val)}
+                      className={`px-3 py-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
+                        emailClientPreference === opt.val
+                          ? "bg-white/10 border-white/20 text-white"
+                          : "bg-zinc-950/60 border-white/10 text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <hr className="border-zinc-800" />
+
               {/* Queue Pacing */}
               <div className="space-y-4">
                 <h3 className="text-sm font-semibold text-white">Queue Pacing Controls</h3>
@@ -1536,7 +2020,7 @@ export default function Home() {
           <div className="p-4 sm:p-8 max-w-5xl w-full mx-auto space-y-6">
             <div className="border-b border-zinc-800 pb-4 flex items-center justify-between">
               <div>
-                <h2 className="text-2xl font-bold text-white">Insights</h2>
+                <h2 className="text-2xl font-bold text-white">Dashboard</h2>
                 <p className="text-xs text-zinc-400 mt-1">
                   Aggregate view across everyone you've added, so patterns show up without re-reading every card.
                 </p>
@@ -1574,8 +2058,94 @@ export default function Home() {
               const bySeniority: Record<string, number> = analyticsData.by_seniority || {};
               const byStatus: Record<string, number> = analyticsData.by_status || {};
 
+              const replyScore = analyticsData.reply_score || {};
+
               return (
                 <>
+                  {renderAnalyticsPanel()}
+
+                  {/* Reply score: the headline number, plus what to do about it */}
+                  <div className="bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-xl p-5">
+                    <div className="flex items-start justify-between gap-4 flex-wrap">
+                      <div>
+                        <span className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">Reply Score</span>
+                        <div className="flex items-baseline gap-2">
+                          <span className={`text-4xl font-bold ${
+                            replyScore.reply_rate == null ? "text-zinc-600" :
+                            replyScore.reply_rate >= 30 ? "text-[#7fb894]" :
+                            replyScore.reply_rate >= 15 ? "text-amber-400" : "text-rose-400"
+                          }`}>
+                            {replyScore.reply_rate == null ? "n/a" : `${replyScore.reply_rate}%`}
+                          </span>
+                          <span className="text-xs text-zinc-500 font-mono">
+                            {replyScore.replied_count || 0} of {replyScore.sent_count || 0} sent
+                          </span>
+                        </div>
+                      </div>
+                      <div className="text-[11px] text-zinc-400 max-w-md leading-relaxed">
+                        {replyScore.sent_count === 0
+                          ? "Nothing marked as Sent yet. Mark a connection Sent after you actually message them, and this starts tracking."
+                          : replyScore.reply_rate >= 30
+                          ? "That is a strong rate for cold outreach. Whatever you are doing on targeting and tone, keep doing it."
+                          : replyScore.reply_rate >= 15
+                          ? "Roughly average for cold outreach. The targets below tend to convert better than a broad spread."
+                          : "On the low side. Usually that means targeting too senior, or the ask in the first message is too big. Look at who did reply below for the pattern."}
+                      </div>
+                    </div>
+
+                    {(replyScore.who_replied?.length > 0 || replyScore.suggested_targets?.length > 0) && (
+                      <div className="grid sm:grid-cols-2 gap-4 mt-5 pt-4 border-t border-white/5">
+                        {replyScore.who_replied?.length > 0 && (
+                          <div>
+                            <span className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-2">
+                              Who actually replied
+                            </span>
+                            <div className="space-y-1.5">
+                              {replyScore.who_replied.map((p: any) => (
+                                <div key={p.id} className="flex items-center justify-between gap-2 text-[11px]">
+                                  {p.profile_url ? (
+                                    <a href={p.profile_url} target="_blank" rel="noopener noreferrer"
+                                       className="text-zinc-300 hover:text-[#7fb894] hover:underline truncate inline-flex items-center gap-1">
+                                      {p.name} <ExternalLink size={9} className="opacity-50 shrink-0" />
+                                    </a>
+                                  ) : (
+                                    <span className="text-zinc-300 truncate">{p.name}</span>
+                                  )}
+                                  <span className="text-zinc-600 font-mono text-[10px] shrink-0">{p.seniority || "?"}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {replyScore.suggested_targets?.length > 0 && (
+                          <div>
+                            <span className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-2">
+                              Reach out to these next
+                            </span>
+                            <div className="space-y-1.5">
+                              {replyScore.suggested_targets.map((p: any) => (
+                                <div key={p.id} className="flex items-center justify-between gap-2 text-[11px]">
+                                  {p.profile_url ? (
+                                    <a href={p.profile_url} target="_blank" rel="noopener noreferrer"
+                                       className="text-zinc-300 hover:text-[#7fb894] hover:underline truncate inline-flex items-center gap-1">
+                                      {p.name} <ExternalLink size={9} className="opacity-50 shrink-0" />
+                                    </a>
+                                  ) : (
+                                    <span className="text-zinc-300 truncate">{p.name}</span>
+                                  )}
+                                  <span className="text-zinc-600 font-mono text-[10px] shrink-0">
+                                    {p.networking_score ? `${p.networking_score}/10` : ""}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
                   {/* Top stat tiles */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">

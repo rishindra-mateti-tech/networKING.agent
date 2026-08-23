@@ -14,7 +14,12 @@ from database import engine, Base, get_db
 from auth import get_current_user, create_access_token, get_password_hash, verify_password
 from parser import parse_pdf_text, extract_linkedin_profile_metadata
 from orchestrator import QueueOrchestrator
-from generator import generate_thread_followup, analyze_conversation_screenshot
+from generator import (
+    generate_thread_followup,
+    analyze_conversation_screenshot,
+    generate_outreach_email,
+    answer_analytics_question,
+)
 from twin_agent import compile_twin_agent_profile
 
 from migrate import run_migrations
@@ -132,7 +137,8 @@ def register(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
         "resume_context", "resume_latex", "github_url",
         "portfolio_url", "linkedin_url", "telegram_token",
         "telegram_chat_id", "slack_webhook_url", "pacing_interval_minutes",
-        "job_search_status", "target_roles", "learning_goals", "tone_examples"
+        "job_search_status", "target_roles", "learning_goals", "tone_examples",
+        "email_client_preference"
     ]
     for key in basic_keys:
         default_val = "15" if key == "pacing_interval_minutes" else ""
@@ -406,11 +412,14 @@ async def upload_linkedin_profile(
     profile_text = None
     connection_count_val = connection_count
     years_experience = 0.0
-    
+    pdf_filename = None
+    candidate_email = None
+
     if file:
         if not file.filename.lower().endswith(".pdf"):
             raise HTTPException(status_code=400, detail="Only PDF profile exports are supported.")
         content = await file.read()
+        pdf_filename = file.filename
         try:
             profile_text = parse_pdf_text(content)
             extracted = extract_linkedin_profile_metadata(profile_text)
@@ -423,6 +432,7 @@ async def upload_linkedin_profile(
             years_experience = extracted["years_experience"]
             if not profile_url:
                 profile_url = extracted.get("profile_url")
+            candidate_email = extracted.get("email")
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Failed to parse profile PDF: {str(e)}")
             
@@ -457,7 +467,9 @@ async def upload_linkedin_profile(
         screenshot_path=screenshot_path,
         status="pending",
         is_starred=False,
-        hiring_badge_status=hiring_badge_status
+        hiring_badge_status=hiring_badge_status,
+        pdf_filename=pdf_filename,
+        candidate_email=candidate_email
     )
     db.add(new_conn)
     db.commit()
@@ -777,11 +789,142 @@ def get_analytics_overview(current_user: models.User = Depends(get_current_user)
             "replied_at": c.replied_at,
         })
 
+    # Reply score: what share of everything actually sent came back with a reply.
+    # Only counts connections that reached "sent", since anything still sitting in
+    # the queue was never given the chance to reply and would unfairly drag the
+    # rate down.
+    sent_count = sum(1 for c in connections if c.sent_at is not None)
+    replied_count = sum(1 for c in connections if c.replied_at is not None)
+    reply_rate = round((replied_count / sent_count) * 100, 1) if sent_count else None
+
+    # When the rate is weak, surface who actually did reply so the pattern is
+    # visible, plus the highest-scoring people never contacted yet.
+    who_replied = [
+        {"id": c.id, "name": c.name, "company": c.company, "profile_url": c.profile_url,
+         "seniority": (j.loads(c.profile_intelligence or "{}").get("seniority") if c.profile_intelligence else None)}
+        for c in connections if c.replied_at is not None
+    ][:10]
+
+    untouched = [c for c in connections if c.sent_at is None and c.status == "completed"]
+    untouched.sort(key=lambda c: (c.networking_score or 0), reverse=True)
+    suggested_targets = [
+        {"id": c.id, "name": c.name, "company": c.company, "profile_url": c.profile_url,
+         "networking_score": c.networking_score, "reply_probability": c.reply_probability}
+        for c in untouched[:5]
+    ]
+
     return {
         "total": len(connections),
         "by_status": by_status,
         "by_seniority": by_seniority,
         "experienced_10_plus": experienced_10_plus,
         "reply_time_buckets": reply_buckets,
+        "reply_score": {
+            "sent_count": sent_count,
+            "replied_count": replied_count,
+            "reply_rate": reply_rate,
+            "who_replied": who_replied,
+            "suggested_targets": suggested_targets,
+        },
         "people": people,
     }
+
+
+@app.post("/api/analytics/ask")
+def ask_analytics(
+    payload: schemas.AnalyticsQuestion,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Free-form question answered by Gemini over the user's own outreach data."""
+    import json as j
+
+    api_key_record = db.query(models.ApiKey).filter(
+        models.ApiKey.user_id == current_user.id,
+        models.ApiKey.is_active == True
+    ).first()
+    if not api_key_record:
+        raise HTTPException(status_code=400, detail="No active API key set. Add a Gemini key under API Key Workers first.")
+
+    connections = db.query(models.Connection).filter(models.Connection.user_id == current_user.id).all()
+
+    rows = []
+    for c in connections:
+        seniority = "Unknown"
+        try:
+            seniority = j.loads(c.profile_intelligence or "{}").get("seniority") or "Unknown"
+        except Exception:
+            pass
+        rows.append(
+            f"- {c.name} | {c.current_title or 'unknown title'} at {c.company or 'unknown company'} | "
+            f"seniority={seniority} | experience={c.years_experience}yrs | connections={c.connection_count} | "
+            f"status={c.status} | networking_score={c.networking_score} | reply_probability={c.reply_probability} | "
+            f"sent={c.sent_at.isoformat() if c.sent_at else 'never'} | "
+            f"replied={c.replied_at.isoformat() if c.replied_at else 'no'} | "
+            f"conversation_verdict={c.conversation_verdict or 'not analyzed'}"
+        )
+
+    sent_count = sum(1 for c in connections if c.sent_at is not None)
+    replied_count = sum(1 for c in connections if c.replied_at is not None)
+    context = (
+        f"Total people added: {len(connections)}\n"
+        f"Total actually sent: {sent_count}\n"
+        f"Total that replied: {replied_count}\n"
+        f"Reply rate: {round((replied_count / sent_count) * 100, 1) if sent_count else 'n/a'}%\n"
+        f"Today's date: {datetime.datetime.utcnow().date().isoformat()}\n\n"
+        f"PER PERSON:\n" + "\n".join(rows)
+    )
+
+    answer = answer_analytics_question(
+        api_key=api_key_record.key_value,
+        question=payload.question,
+        analytics_context=context
+    )
+    return {"answer": answer}
+
+
+@app.post("/api/connections/{connection_id}/generate-email")
+def generate_email_draft(
+    connection_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Writes a real outreach email (subject + body) for this person."""
+    conn = db.query(models.Connection).filter(
+        models.Connection.id == connection_id,
+        models.Connection.user_id == current_user.id
+    ).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    api_key_record = db.query(models.ApiKey).filter(
+        models.ApiKey.user_id == current_user.id,
+        models.ApiKey.is_active == True
+    ).first()
+    if not api_key_record:
+        raise HTTPException(status_code=400, detail="No active API key set for email generation.")
+
+    settings_records = db.query(models.Setting).filter(models.Setting.user_id == current_user.id).all()
+    settings = {s.key: s.value for s in settings_records if s.value}
+
+    result = generate_outreach_email(
+        api_key=api_key_record.key_value,
+        twin_profile=compile_twin_agent_profile(db, current_user.id),
+        candidate_name=conn.name,
+        candidate_email=conn.candidate_email or "",
+        candidate_profile=conn.profile_text or "",
+        bridge_data={
+            "profile_intelligence": conn.profile_intelligence,
+            "company_intelligence": conn.company_intelligence,
+            "relationship_strategy": conn.relationship_strategy,
+            "personalization_data": conn.personalization_data,
+            "context_summary": conn.context_summary,
+        },
+        tone_examples=settings.get("tone_examples", ""),
+    )
+
+    conn.generated_email_subject = result["subject"]
+    conn.generated_email_body = result["body"]
+    db.commit()
+
+    return {"subject": result["subject"], "body": result["body"]}

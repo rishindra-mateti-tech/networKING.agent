@@ -30,7 +30,7 @@ def _call_gemini(api_key: str, system_instruction: str, prompt_or_contents, json
     """
     Calls the Gemini API using a per-call Client (google-genai SDK). Each Client instance
     carries its own API key with no shared global state, so concurrent workers on different
-    keys run in true parallel — unlike the legacy `google.generativeai` module-global
+    keys run in true parallel, unlike the legacy `google.generativeai` module-global
     `configure()` API this replaced, which forced every call in the process onto one lock.
     """
     client = genai.Client(api_key=api_key)
@@ -561,7 +561,7 @@ def run_message_writing_agent(
       "Fellow Wright State Builder 👋 Hi {candidate_name}, fellow Wright State alum here. I came across your profile while learning about {candidate_company} and really enjoyed seeing how you approached building resilient engineering teams. I'm currently pursuing my MS in CS at WSU and working as an AI Engineer Intern at ZUZU.AI. If you ever have a spare moment to share your perspective on how you made that transition, I would truly value your guidance. No pressure at all."
     
     * Recruiter / TA Specialist Advice Request:
-      "Hi {candidate_name}, Thank you for connecting. I'm a CS Master's student at Wright State University working on AI/ML projects, including an IEEE-published paper and the Google × Kaggle AI Agents Intensive. I know you support technical recruiting at {candidate_company}, so I wanted to ask very humbly — what would you recommend students like me focus on to become stronger candidates in the future? I know your time is valuable, so even a single line of advice would be something I'd be incredibly grateful for."
+      "Hi {candidate_name}, Thank you for connecting. I'm a CS Master's student at Wright State University working on AI/ML projects, including an IEEE-published paper and the Google × Kaggle AI Agents Intensive. I know you support technical recruiting at {candidate_company}, so I wanted to ask very humbly, what would you recommend students like me focus on to become stronger candidates in the future? I know your time is valuable, so even a single line of advice would be something I'd be incredibly grateful for."
     
     Please generate EXACTLY 5 message variants:
     1. Referral Draft (Focuses on job opportunity referral or learning about open opportunities in their team/company)
@@ -777,6 +777,161 @@ def generate_thread_followup(api_key: str, twin_profile: str, candidate_profile:
         return clean_unicode_text(reply_text.strip())
     except Exception as e:
         return f"Error generating follow-up: {str(e)}"
+
+
+def generate_outreach_email(
+    api_key: str,
+    twin_profile: str,
+    candidate_name: str,
+    candidate_email: str,
+    candidate_profile: str,
+    bridge_data: dict,
+    tone_examples: str = "",
+) -> dict:
+    """
+    Writes a real outreach EMAIL (subject + body), distinct from the short-form
+    LinkedIn DM variants. Email is a different medium: more room, a subject line
+    that has to earn the open, and a reader who is likely skimming in a crowded
+    inbox. Draws its facts from the TwinAgent profile, so when the user's resume
+    is re-uploaded, future emails automatically reflect the newer background.
+    """
+    try:
+        profile_intel = json.loads(bridge_data.get("profile_intelligence") or "{}")
+        company_intel = json.loads(bridge_data.get("company_intelligence") or "{}")
+        strategy_intel = json.loads(bridge_data.get("relationship_strategy") or "{}")
+        personalization = json.loads(bridge_data.get("personalization_data") or "{}")
+    except Exception:
+        profile_intel, company_intel, strategy_intel, personalization = {}, {}, {}, {}
+
+    context_summary = bridge_data.get("context_summary") or ""
+
+    system_instruction = (
+        "You write cold outreach emails that get replies, in the voice of the user described below. "
+        "You are not a marketing copywriter and you are not an assistant announcing itself. You are "
+        "writing as this person, to another person, one human to another.\n\n"
+
+        "WHAT MAKES AN EMAIL GET READ AND ANSWERED:\n"
+        "- The subject line is the whole ballgame. It should be 3 to 7 words, lowercase or sentence case, "
+        "and read like something a colleague would send, not a campaign. Reference the specific thing this "
+        "email is actually about. Never use: 'Exciting Opportunity', 'Quick Question' (overused to death), "
+        "'Reaching Out', 'Connecting', 'Introduction', or anything with an exclamation mark or emoji.\n"
+        "- The first sentence must prove a human read their work. Not 'I came across your profile' (everyone "
+        "says that, it signals a list). Name the actual specific thing: a project, a decision their team made, "
+        "a talk they gave, the shift in their career path. If you have nothing specific, say something honest "
+        "and plain instead of faking familiarity.\n"
+        "- The ask must be small, singular, and easy to say yes to. One ask per email. A busy person should be "
+        "able to reply usefully in two sentences without scheduling anything.\n"
+        "- Total length: 90 to 150 words in the body. Long enough to be substantive, short enough that the "
+        "whole thing is visible without scrolling on a phone.\n\n"
+
+        "HOW TO SOUND HUMAN AND NOT LIKE A LANGUAGE MODEL:\n"
+        "- Never use an em dash or en dash. Not once. If a sentence wants one, split it into two sentences or "
+        "use a comma, a period, or 'and'/'but'. Em dashes are the single clearest tell that a machine wrote this.\n"
+        "- Use contractions the way people actually type: I'm, I've, it's, that's, don't, wouldn't.\n"
+        "- Vary sentence length hard. A long one, then a short one. Uniform medium-length sentences read as generated.\n"
+        "- Banned phrases, absolutely no exceptions: 'I hope this email finds you well', 'I hope you're doing well', "
+        "'I wanted to reach out', 'I came across your profile', 'I was impressed by', 'delve', 'leverage', 'synergy', "
+        "'unlock', 'game-changer', 'passionate about', 'circle back', 'touch base', 'pick your brain', 'thought leader', "
+        "'in today's fast-paced world', 'navigate the landscape', 'I'd love to connect', 'excited to connect', "
+        "'Looking forward to hearing from you', 'Thanks in advance', 'at your earliest convenience', 'reach out if'.\n"
+        "- No stacked adjectives and no praise inflation ('incredible work', 'truly inspiring', 'amazing journey'). "
+        "Describe concretely what they did. Specificity IS the compliment.\n"
+        "- No bullet points, no headers, no bold. This is an email between two people, not a deck.\n"
+        "- Do not open with the user's own resume. Lead with them, then earn the right to say who you are in one line.\n"
+        "- Sign off plainly: 'Thanks,' or 'Best,' then the name. Nothing more elaborate.\n\n"
+
+        "HONESTY RULES, THESE OVERRIDE EVERYTHING ELSE:\n"
+        "- Only state facts about the user that appear in the profile provided. Never invent a job, a school, a "
+        "metric, a mutual connection, or a shared experience that is not there.\n"
+        "- Never claim to have used their product, read their paper, or attended their talk unless the provided "
+        "context explicitly says so.\n"
+        "- If the research context is thin, write a shorter, plainer email. A short honest email beats a long "
+        "email padded with invented familiarity."
+    )
+
+    prompt = f"""
+    WHO IS WRITING THIS EMAIL (the user). Every factual claim about the sender must come from here:
+    {twin_profile}
+
+    THE USER'S OWN WRITING SAMPLES, MATCH THIS VOICE:
+    {tone_examples or "No samples provided. Default to plain, direct, warm but not effusive."}
+
+    WHO IT IS GOING TO:
+    - Name: {candidate_name}
+    - Email: {candidate_email}
+    - Role: {profile_intel.get("role") or profile_intel.get("title") or "Unknown"}
+    - Company: {profile_intel.get("company") or "Unknown"}
+    - Seniority: {profile_intel.get("seniority") or "Unknown"}
+    - Technologies they work with: {profile_intel.get("technologies") or "Unknown"}
+    - Their recent activity: {profile_intel.get("recent_posts") or "None available"}
+
+    THEIR COMPANY:
+    - Type / stage: {company_intel.get("company_type") or "Unknown"} ({company_intel.get("company_stage") or "Unknown"})
+    - Engineering culture: {company_intel.get("engineering_culture") or "Unknown"}
+
+    THE DECIDED STRATEGY FOR THIS PERSON:
+    {context_summary}
+    - Do: {strategy_intel.get("dos")}
+    - Do NOT: {strategy_intel.get("donts")}
+
+    SPECIFIC HOOKS WORTH USING:
+    - {personalization.get("conversation_hooks")}
+    - Motivation / career pattern: {personalization.get("motivation_hooks")}
+    - Avoid mentioning: {personalization.get("avoid_points")}
+
+    Write one email. Respect the strategy above, especially the DO NOTs. Adjust the ask to their seniority:
+    a founder or VP gets a thoughtful question about their direction and no favor request; a recruiter gets a
+    clear statement of what role is being targeted and an offer to send a resume; an engineer gets a specific
+    technical question they would enjoy answering.
+
+    Return ONLY raw JSON, no markdown fences, with exactly these fields:
+    - "subject": the subject line
+    - "body": the full email body including the greeting and sign-off, with real line breaks between paragraphs
+    """
+
+    try:
+        raw_output = _call_gemini(api_key, system_instruction, prompt, json_mode=True)
+        cleaned_output = _strip_json_codeblock(raw_output)
+        data = json.loads(cleaned_output)
+        return {
+            "subject": clean_unicode_text(data.get("subject", "")).strip(),
+            "body": clean_unicode_text(data.get("body", "")).strip(),
+        }
+    except Exception as e:
+        print(f"Error generating outreach email: {e}")
+        return {"subject": "", "body": f"Failed to generate email: {e}"}
+
+
+def answer_analytics_question(api_key: str, question: str, analytics_context: str) -> str:
+    """
+    Free-form Q&A over the user's own outreach data. The caller serializes the
+    aggregate stats plus a per-person summary into `analytics_context`, so the
+    model reasons over real numbers instead of guessing.
+    """
+    system_instruction = (
+        "You are a sharp, blunt analyst looking at one person's real job-search outreach data. "
+        "Answer only from the data provided. If the data cannot answer the question, say so plainly "
+        "and say what would need to be tracked to answer it, rather than inventing a number.\n"
+        "Give the answer first, then the reasoning. Cite actual names and numbers from the data. "
+        "Be concrete about what to do next. Never use an em dash or en dash. No corporate filler, "
+        "no 'it's worth noting', no restating the question back. Keep it under 200 words unless the "
+        "question genuinely needs more."
+    )
+
+    prompt = f"""
+    HERE IS THE USER'S COMPLETE OUTREACH DATA:
+    {analytics_context}
+
+    THEIR QUESTION:
+    {question}
+
+    Answer it using only the data above.
+    """
+
+    try:
+        return clean_unicode_text(_call_gemini(api_key, system_instruction, prompt).strip())
+    except Exception as e:
+        return f"Could not analyze that: {e}"
 
 
 def analyze_conversation_screenshot(

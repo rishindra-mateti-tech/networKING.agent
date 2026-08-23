@@ -65,6 +65,15 @@ class Connection(Base):
     # URL & Screen Context
     profile_url = Column(String, nullable=True)
     screenshot_path = Column(String, nullable=True)
+
+    # Source file + contact details harvested from the PDF
+    pdf_filename = Column(String, nullable=True)     # original uploaded filename
+    candidate_email = Column(String, nullable=True)  # email found in the profile text, if any
+
+    # Generated outreach email (kept separate from LinkedIn DM drafts, which
+    # are short-form; this one is a real email with a subject line)
+    generated_email_subject = Column(Text, nullable=True)
+    generated_email_body = Column(Text, nullable=True)
     
     # Rich Platform Signals & Metrics
     networking_score = Column(Float, nullable=True)
