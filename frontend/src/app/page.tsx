@@ -97,6 +97,9 @@ export default function Home() {
   const [isBackendOffline, setIsBackendOffline] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
+  // The three tabs that live inside the main workspace page
+  const [homeTab, setHomeTab] = useState<"target" | "uploads" | "dashboard">("target");
+
   // Insights / Analytics
   const [analyticsData, setAnalyticsData] = useState<any | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
@@ -140,11 +143,11 @@ export default function Home() {
 
   // Load analytics whenever the Insights tab is opened
   useEffect(() => {
-    if (currentView === "insights" && token) {
+    if (currentView === "pipeline" && homeTab === "dashboard" && token) {
       fetchAnalytics();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentView, token]);
+  }, [currentView, homeTab, token]);
 
   // On Mount: Check LocalStorage for token
   useEffect(() => {
@@ -1049,32 +1052,7 @@ export default function Home() {
             }`}
           >
             <Users size={18} />
-            <span>Outreach Target</span>
-          </button>
-          <button
-            onClick={() => goToView("uploads")}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-              currentView === "uploads" ? "bg-zinc-800 text-white font-semibold" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
-            }`}
-          >
-            <FileText size={18} />
-            <div className="flex-1 flex items-center justify-between">
-              <span>Uploads</span>
-              {connections.length > 0 && (
-                <span className="text-[10px] bg-white/5 text-zinc-400 border border-white/10 px-1.5 py-0.5 rounded-full font-mono">
-                  {connections.length}
-                </span>
-              )}
-            </div>
-          </button>
-          <button
-            onClick={() => goToView("insights")}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-              currentView === "insights" ? "bg-zinc-800 text-white font-semibold" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
-            }`}
-          >
-            <BarChart3 size={18} />
-            <span>Dashboard</span>
+            <span>Outreach Pipeline</span>
           </button>
 
           <div className="pt-4 mt-2 border-t border-white/5">
@@ -1153,10 +1131,41 @@ export default function Home() {
           </div>
         )}
         
-        {/* VIEW A: PIPELINE KANBAN DASHBOARD */}
+        {/* The three main tabs live inside this page, not in the sidebar */}
         {currentView === "pipeline" && (
+          <div className="px-6 pt-5 pb-1 shrink-0">
+            <div className="inline-flex items-center gap-1 bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-xl p-1">
+              {([
+                { id: "target", label: "Outreach Target", icon: <Users size={14} /> },
+                { id: "uploads", label: "Uploads", icon: <FileText size={14} />, count: connections.length },
+                { id: "dashboard", label: "Dashboard", icon: <BarChart3 size={14} /> },
+              ] as const).map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setHomeTab(tab.id as any)}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                    homeTab === tab.id
+                      ? "bg-white/10 text-white"
+                      : "text-zinc-500 hover:text-zinc-200"
+                  }`}
+                >
+                  {tab.icon}
+                  <span>{tab.label}</span>
+                  {"count" in tab && tab.count > 0 && (
+                    <span className="text-[9px] bg-white/10 text-zinc-400 px-1.5 py-0.5 rounded-full font-mono">
+                      {tab.count}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 1: OUTREACH TARGET (kanban + add profiles) */}
+        {currentView === "pipeline" && homeTab === "target" && (
           <div className="flex-1 flex flex-col">
-            
+
             {/* Top Command Bar */}
             <div className="p-6 border-b border-zinc-800 bg-zinc-900/10 flex items-center justify-between gap-4 flex-wrap">
               <div className="flex items-center space-x-4 flex-1 max-w-lg">
@@ -1317,7 +1326,7 @@ export default function Home() {
         )}
 
         {/* VIEW F: UPLOADS TABLE */}
-        {currentView === "uploads" && (
+        {currentView === "pipeline" && homeTab === "uploads" && (
           <div className="p-4 sm:p-6 w-full space-y-4">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
@@ -2016,7 +2025,7 @@ export default function Home() {
         )}
 
         {/* VIEW E: INSIGHTS / ANALYTICS */}
-        {currentView === "insights" && (
+        {currentView === "pipeline" && homeTab === "dashboard" && (
           <div className="p-4 sm:p-8 max-w-5xl w-full mx-auto space-y-6">
             <div className="border-b border-zinc-800 pb-4 flex items-center justify-between">
               <div>
