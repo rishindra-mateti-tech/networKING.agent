@@ -114,6 +114,24 @@ vercel --prod
 
 You'll get a URL like `https://networking-agent.vercel.app`.
 
+### Auto-deploy on every push
+
+The CLI deploy above is a one-off. To get the same push-to-deploy behaviour
+Render already has, connect the project to GitHub:
+
+1. Vercel dashboard, your project, Settings, Git, Connect Git Repository.
+2. If the repo doesn't appear in the list, click **Configure GitHub App** and
+   grant Vercel access to it. Vercel's GitHub App is scoped to specific repos,
+   and a repo created after that grant won't be visible until you add it.
+3. Settings, Build and Deployment, set **Root Directory** to `frontend`.
+   This one is mandatory. This repo has a `package.json` at its root (the
+   orchestrator that boots both servers), so a build from the repo root finds
+   that instead of the Next.js app and fails.
+4. Confirm the production branch is `master`, not `main`. Vercel inherits the
+   repo's default branch on connect, which is `master` here.
+
+Saving these settings does not itself deploy. The next push to `master` will.
+
 ## 5. Close the loop: let the frontend actually call the backend
 
 Go back to Render, open the service's Environment tab, and update
