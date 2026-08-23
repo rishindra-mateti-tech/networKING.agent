@@ -25,7 +25,7 @@ export default function Home() {
   
   // Search & Filter
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const [statusGroupFilter, setStatusGroupFilter] = useState("");
 
   // Modals / Selected Items
   const [selectedConnection, setSelectedConnection] = useState<any | null>(null);
@@ -855,15 +855,17 @@ export default function Home() {
     { title: "Funnel Closed", statusKeys: ["interview", "closed"], color: "border-white/10 bg-white/[0.02]" }
   ];
 
-  // Filtering connections list
+  // Search-only. The status filter is applied separately in the list view,
+  // because it filters by status GROUP (a label like "Replied / Chatting"
+  // covering several raw statuses) rather than by one exact status string.
   const filteredConnections = connections.filter(conn => {
-    const matchesSearch = searchQuery === "" || 
-      conn.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (conn.company && conn.company.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (conn.current_title && conn.current_title.toLowerCase().includes(searchQuery.toLowerCase()));
-      
-    const matchesStatus = statusFilter === "" || conn.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    if (searchQuery === "") return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      conn.name.toLowerCase().includes(q) ||
+      (conn.company && conn.company.toLowerCase().includes(q)) ||
+      (conn.current_title && conn.current_title.toLowerCase().includes(q))
+    );
   });
 
   // Calculate active Worker threads count
@@ -1230,97 +1232,136 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Kanban columns content */}
+            {/* Analytics + one flat list, each row carrying its own status.
+                Replaced a six-column kanban: with a handful of people most
+                columns sat empty, so the layout spent its width on nothing. */}
             <div className="px-6 pt-4">
               {renderAnalyticsPanel()}
             </div>
 
-            <div className="flex-1 p-6 overflow-x-auto flex gap-6 items-start">
-              {columns.map(col => {
-                const colConnections = filteredConnections.filter(c => col.statusKeys.includes(c.status));
-                return (
-                  <div key={col.title} className="w-80 shrink-0 flex flex-col max-h-full">
-                    
-                    {/* Column Header */}
-                    <div className="flex items-center justify-between mb-4 px-2">
-                      <div className="flex items-center space-x-2">
-                        <h2 className="text-sm font-bold text-zinc-200">{col.title}</h2>
-                        <span className="text-[10px] bg-zinc-800 text-zinc-400 border border-zinc-700 px-1.5 py-0.5 rounded-full font-mono">
-                          {colConnections.length}
-                        </span>
+            <div className="flex-1 px-6 py-4 overflow-y-auto space-y-4">
+
+              {/* Status filter, doing the job the columns used to do */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[{ label: "All", keys: [] as string[] }, ...columns.map(c => ({ label: c.title, keys: [...c.statusKeys] }))].map(f => {
+                  const count = f.keys.length === 0
+                    ? filteredConnections.length
+                    : filteredConnections.filter(c => f.keys.includes(c.status)).length;
+                  const isActive = statusGroupFilter === f.label;
+                  return (
+                    <button
+                      key={f.label}
+                      onClick={() => setStatusGroupFilter(isActive ? "" : f.label)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold border transition-colors cursor-pointer ${
+                        isActive
+                          ? "bg-white/10 border-white/20 text-white"
+                          : "bg-white/[0.02] border-white/10 text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      {f.label}
+                      <span className="text-[9px] font-mono text-zinc-500">{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* The list */}
+              <div className="space-y-2">
+                {(() => {
+                  const activeFilter = columns.find(c => c.title === statusGroupFilter);
+                  const visible = activeFilter
+                    ? filteredConnections.filter(c => activeFilter.statusKeys.includes(c.status))
+                    : filteredConnections;
+
+                  if (visible.length === 0) {
+                    return (
+                      <div className="text-center py-16 border border-dashed border-white/10 rounded-xl text-[11px] text-zinc-600 font-mono">
+                        {connections.length === 0
+                          ? "Nothing here yet. Add an outreach target to get started."
+                          : "Nothing matches this filter."}
+                      </div>
+                    );
+                  }
+
+                  return visible.map(conn => (
+                    <div
+                      key={conn.id}
+                      onClick={() => setSelectedConnection(conn)}
+                      className="bg-white/[0.03] backdrop-blur-xl border border-white/10 hover:border-white/20 rounded-xl px-4 py-3 cursor-pointer transition-colors group flex items-center gap-4"
+                    >
+                      {/* Identity */}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          {conn.is_starred && (
+                            <Star size={11} className="text-amber-400 shrink-0" fill="currentColor" />
+                          )}
+                          <h3 className="text-sm font-bold text-white truncate">{conn.name}</h3>
+                        </div>
+                        <p className="text-[11px] text-zinc-400 truncate mt-0.5">
+                          {[conn.current_title, conn.company].filter(Boolean).join(" · ") || "No title or company yet"}
+                        </p>
+                        {conn.error_message && (
+                          <div className="mt-1.5 text-[9px] text-rose-400 flex items-center gap-1">
+                            <AlertCircle size={9} className="shrink-0" />
+                            <span className="truncate">{conn.error_message}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Signal chips */}
+                      <div className="hidden md:flex items-center gap-1.5 shrink-0">
+                        {conn.best_angle && (
+                          <span className="text-[9px] font-semibold uppercase tracking-wider bg-white/5 text-zinc-400 border border-white/10 px-1.5 py-0.5 rounded">
+                            {conn.best_angle}
+                          </span>
+                        )}
+                        {conn.years_experience > 0 && (
+                          <span className="text-[9px] font-mono bg-white/5 text-zinc-400 px-1.5 py-0.5 rounded">
+                            {conn.years_experience}y
+                          </span>
+                        )}
+                        {conn.networking_score && (
+                          <span className="text-[9px] font-mono bg-white/5 text-zinc-400 px-1.5 py-0.5 rounded">
+                            {conn.networking_score}/10
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Status */}
+                      <span className={`text-[10px] font-semibold px-2 py-1 rounded-md shrink-0 w-24 text-center ${
+                        conn.status === "processing" ? "bg-amber-500/10 text-amber-400" :
+                        conn.status === "completed" ? "bg-white/10 text-zinc-200" :
+                        conn.status === "sent" ? "bg-sky-500/10 text-sky-300" :
+                        ["replied", "follow_up"].includes(conn.status) ? "bg-[#4d8565]/15 text-[#7fb894]" :
+                        conn.status === "failed" ? "bg-rose-500/10 text-rose-400" :
+                        "bg-white/5 text-zinc-500"
+                      }`}>
+                        {conn.status === "completed" ? "Draft Ready"
+                          : conn.status === "follow_up" ? "Follow Up"
+                          : conn.status.charAt(0).toUpperCase() + conn.status.slice(1)}
+                      </span>
+
+                      {/* Row actions */}
+                      <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleToggleStar(conn.id); }}
+                          className={`p-1.5 rounded hover:bg-white/10 transition-colors ${conn.is_starred ? "text-amber-400" : "text-zinc-500"}`}
+                          aria-label="Star"
+                        >
+                          <Star size={13} fill={conn.is_starred ? "currentColor" : "none"} />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDeleteConnection(conn.id); }}
+                          className="p-1.5 rounded hover:bg-white/10 text-zinc-500 hover:text-rose-400 transition-colors"
+                          aria-label="Delete"
+                        >
+                          <Trash2 size={13} />
+                        </button>
                       </div>
                     </div>
-
-                    {/* Column Items area */}
-                    <div className={`flex-1 overflow-y-auto space-y-3 rounded-xl border p-3 min-h-[120px] max-h-[70vh] transition-colors ${col.color}`}>
-                      {colConnections.map(conn => (
-                        <div 
-                          key={conn.id}
-                          onClick={() => setSelectedConnection(conn)}
-                          className="bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-xl p-4 cursor-pointer hover:shadow-lg transition-all group relative"
-                        >
-                          <div className="flex justify-between items-start mb-2">
-                            <h3 className="text-sm font-bold text-white group-hover:text-zinc-300 transition-colors pr-6">
-                              {conn.name}
-                            </h3>
-                            <div className="flex items-center space-x-1 absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); handleToggleStar(conn.id); }}
-                                className={`p-1 rounded hover:bg-zinc-800 transition-colors ${conn.is_starred ? "text-amber-400" : "text-zinc-500"}`}
-                              >
-                                <Star size={14} fill={conn.is_starred ? "currentColor" : "none"} />
-                              </button>
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); handleDeleteConnection(conn.id); }}
-                                className="p-1 rounded hover:bg-zinc-800 text-zinc-500 hover:text-rose-400 transition-colors"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
-                            {!conn.is_starred && conn.is_starred !== undefined && (
-                              <div className="absolute top-4 right-4 text-amber-500 w-1.5 h-1.5 rounded-full bg-amber-500 hidden" />
-                            )}
-                            {conn.is_starred && (
-                              <Star size={12} className="text-amber-400 absolute top-4 right-4" fill="currentColor" />
-                            )}
-                          </div>
-                          
-                          <p className="text-xs text-zinc-400 line-clamp-1">{conn.current_title || "No Title"}</p>
-                          <p className="text-[10px] text-zinc-500 font-medium mt-1">{conn.company || "No Company"}</p>
-
-                          {/* Quick Bridge Score tags */}
-                          {conn.best_angle && (
-                            <div className="mt-3 pt-3 border-t border-zinc-800/80 flex flex-wrap items-center gap-1.5">
-                              <span className="text-[9px] font-semibold uppercase tracking-wider bg-zinc-900 text-zinc-400 border border-zinc-800 px-1.5 py-0.5 rounded">
-                                {conn.best_angle}
-                              </span>
-                              {conn.years_experience > 0 && (
-                                <span className="text-[9px] font-mono bg-zinc-800 text-zinc-400 px-1.5 py-0.5 rounded">
-                                  {conn.years_experience} yrs exp
-                                </span>
-                              )}
-                            </div>
-                          )}
-
-                          {/* Connection logs state indicator */}
-                          {conn.error_message && (
-                            <div className="mt-2 text-[9px] text-rose-400 bg-rose-950/20 border border-rose-900/30 rounded p-1.5 flex items-center space-x-1">
-                              <AlertCircle size={10} className="shrink-0" />
-                              <span className="line-clamp-1">{conn.error_message}</span>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-
-                      {colConnections.length === 0 && (
-                        <div className="h-24 flex items-center justify-center border border-dashed border-zinc-800 rounded-lg text-[10px] text-zinc-600 font-mono">
-                          Column empty
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+                  ));
+                })()}
+              </div>
             </div>
           </div>
         )}
