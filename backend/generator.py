@@ -289,6 +289,13 @@ def run_relationship_strategy_agent(api_key: str, profile_json: dict, company_js
     - "reply_probability": Statistical likelihood (0.0 to 100.0%) of receiving a reply. Highly active accounts, alumni, and recruiters have high rates, while VIPs with large audience size (follower count) have lower rates.
     - "is_decision_maker": Inferred decision maker status (one of: "yes", "no", "partial").
     - "networking_difficulty": Expected difficulty of networking (one of: "easy", "medium", "hard", "very_hard").
+      CONSISTENCY RULE: this must agree with reply_probability, since they measure the same underlying thing
+      from two directions. Someone easy to reach is by definition likely to reply. Keep them aligned:
+        reply_probability 60-100  -> "easy"
+        reply_probability 35-59   -> "medium"
+        reply_probability 15-34   -> "hard"
+        reply_probability 0-14    -> "very_hard"
+      Never report a low reply probability alongside "easy", or a high one alongside "hard".
     - "referral_potential": Referral potential (one of: "high", "medium", "low").
     - "hiring_probability_score": Likelihood of hiring status (one of: "high", "medium", "low", "unknown"). Matches the hiring badge and company context.
     - "strategy": A brief description of the core strategy.
@@ -322,11 +329,24 @@ def run_relationship_strategy_agent(api_key: str, profile_json: dict, company_js
         except (ValueError, TypeError):
             reply_prob = 50.0
 
+        # Derive difficulty from reply probability rather than trusting the two
+        # to agree. They describe the same thing from opposite directions, and
+        # asked separately the model would happily return "35% reply chance"
+        # next to "easy", which reads as broken to anyone looking at the card.
+        if reply_prob >= 60:
+            difficulty = "easy"
+        elif reply_prob >= 35:
+            difficulty = "medium"
+        elif reply_prob >= 15:
+            difficulty = "hard"
+        else:
+            difficulty = "very_hard"
+
         return {
             "networking_score": net_score,
             "reply_probability": reply_prob,
             "is_decision_maker": data.get("is_decision_maker", "no"),
-            "networking_difficulty": data.get("networking_difficulty", "medium"),
+            "networking_difficulty": difficulty,
             "referral_potential": data.get("referral_potential", "medium"),
             "hiring_probability_score": data.get("hiring_probability_score", "unknown"),
             "strategy": clean_unicode_text(data.get("strategy", "")),

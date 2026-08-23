@@ -134,16 +134,257 @@ def _extract_company_from_experience(lines: list) -> str:
             c = candidate.strip()
             if not c:
                 continue
-            # Page furniture and date lines are not company names
+            # Page furniture
             if re.match(r"^page\s+\d+\s+of\s+\d+$", c, re.IGNORECASE):
                 continue
-            if re.match(r"^[\d(]", c):
+            # Tenure lines: "7 years 2 months", "1 year 11 months"
+            if re.match(r"^\d+\s+(year|yr|month|mo)s?\b", c, re.IGNORECASE):
                 continue
+            # Date ranges: "September 2024 - Present", "2019 - 2021"
             if re.match(r"^(january|february|march|april|may|june|july|august|september|october|november|december)\b", c, re.IGNORECASE):
                 continue
+            if re.match(r"^\d{4}\s*[-–]", c):
+                continue
+            if c.startswith("("):
+                continue
+            # NOTE: deliberately not skipping every line that opens with a
+            # digit. Real employers do ("10G Caterpillar - Aerotek", "3M",
+            # "7-Eleven"), and a blanket digit rule silently demoted those to
+            # the job title on the following line.
             if len(c) > 80:
                 continue
             return c
+    return None
+
+
+def _rejoin_wrapped_urls(pdf_text: str) -> str:
+    """
+    The narrow sidebar column wraps long values across a line break, which
+    leaves URLs and emails truncated unless they are stitched back together:
+
+        www.linkedin.com/in/mary-alexis-   +  jackson-3a8806186 (LinkedIn)
+        www.linkedin.com/in/               +  sakthisankarraman (LinkedIn)
+        gowthamisingam1998@gmail.co        +  m
+
+    Runs before any other parsing so everything downstream sees whole values.
+    """
+    lines = pdf_text.split("\n")
+    out = []
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].rstrip()
+        nxt = lines[i + 1].strip() if i + 1 < len(lines) else ""
+
+        # Profile URL split at a hyphen or at the trailing slash
+        if (
+            "linkedin.com/in/" in stripped.lower()
+            and (stripped.endswith("-") or stripped.endswith("/"))
+            and nxt
+        ):
+            # Only the first token continues the URL; a trailing "(LinkedIn)"
+            # label is not part of it.
+            out.append(stripped + nxt.split()[0])
+            i += 2
+            continue
+
+        # Email split inside the domain, where the tail is a bare fragment
+        if (
+            "@" in stripped
+            and not stripped.endswith(("com", "org", "net", "edu", "gov", "io"))
+            and re.match(r"^[A-Za-z]{1,4}$", nxt)
+        ):
+            out.append(stripped + nxt)
+            i += 2
+            continue
+
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out)
+
+
+# Words that mark a line as a job headline rather than a person's name.
+_ROLE_WORDS = [
+    # Roles
+    "engineer", "engineering", "developer", "manager", "director", "analyst",
+    "consultant", "specialist", "recruiter", "recruiting", "scientist",
+    "designer", "architect", "founder", "co-founder", "cofounder", "intern",
+    "associate", "officer", "president", "partner", "professional",
+    "strategist", "swe", "author", "student", "advisor", "executive",
+    "administrator", "coordinator", "supervisor", "technician", "researcher",
+    "lead", "head", "owner", "coach", "trainer", "teacher", "professor",
+    "attorney", "counsel", "accountant", "nurse", "physician",
+    # Seniority modifiers
+    "senior", "junior", "staff", "principal", "chief", "ceo", "cto", "coo",
+    "cfo", "vp",
+    # Functions
+    "operations", "marketing", "sales", "product", "program", "project",
+    "technical", "talent", "acquisition", "business", "finance", "support",
+    "human resources",
+    # Phrases that open a self-description rather than a name
+    "helping", "building",
+]
+
+
+def _is_headline_like(text: str) -> bool:
+    """
+    True for a professional headline, false for a person's name. Every export
+    reviewed puts one directly under the other, so this is the split that
+    decides which line becomes the name.
+    """
+    if not text:
+        return False
+    lowered = text.lower()
+    if len(text) > 45:
+        return True
+    if "|" in text or "@" in text:
+        return True
+    if re.search(r"\bat\b", lowered):
+        return True
+    return any(re.search(rf"\b{re.escape(w)}\b", lowered) for w in _ROLE_WORDS)
+
+
+def _looks_like_person_name(text: str) -> bool:
+    """Shape check for a name line: short, 1 to 5 mostly-alphabetic words."""
+    if not text or len(text) > 45:
+        return False
+    if "@" in text or "linkedin.com" in text.lower() or "http" in text.lower():
+        return False
+    if _looks_like_location(text) or _is_headline_like(text):
+        return False
+    # Allow a credential suffix, e.g. "Seth Forbes, MBA" / "Micah Alsouss, SHRM-CP"
+    core = text.split(",")[0].strip()
+    words = core.split()
+    if not (1 <= len(words) <= 5):
+        return False
+    if not core[:1].isupper():
+        return False
+    # Tolerate initials, periods, hyphens and parenthesised nicknames
+    return all(re.match(r"^[A-Za-z.'()\-]+$", w) for w in words)
+
+
+def extract_identity_block(lines: list) -> dict:
+    """
+    Locates the name, headline and location together, since their positions
+    are only meaningful relative to each other.
+
+    Every LinkedIn export follows the same order once the sidebar ends:
+        <name> / <headline, sometimes wrapped over 2-3 lines> / <location>
+    immediately above the first "Summary" or "Experience" heading. Anchoring
+    on that heading and walking upwards is reliable in a way that counting
+    lines from the top of the document is not, because the sidebar's length
+    varies enormously (Contact, Top Skills, Languages, Certifications,
+    Honors-Awards and Publications may each be present or absent).
+    """
+    result = {"name": None, "headline": None, "location": None}
+
+    anchor = next(
+        (i for i, l in enumerate(lines) if l.strip().lower() in ("summary", "experience")),
+        None,
+    )
+    if anchor is None or anchor < 2:
+        return result
+
+    # The location always occupies the line directly above the heading.
+    location_idx = anchor - 1
+    if _looks_like_location(lines[location_idx]):
+        result["location"] = lines[location_idx].strip()
+        headline_end = location_idx - 1
+    else:
+        # No location on this profile; that slot is the tail of the headline.
+        headline_end = location_idx
+
+    # Walk up through the headline. A line belongs to it when it reads as a
+    # headline, or when the line above it clearly wrapped (over 45 characters),
+    # which makes this line that wrap's continuation.
+    i = headline_end
+    while i > 0:
+        current = lines[i].strip()
+        previous = lines[i - 1].strip()
+        is_continuation = _is_headline_like(previous) and len(previous) > 45
+        if _is_headline_like(current) or is_continuation:
+            i -= 1
+            continue
+        break
+
+    name_idx = i
+    if 0 <= name_idx <= headline_end and _looks_like_person_name(lines[name_idx]):
+        result["name"] = lines[name_idx].strip()
+        if headline_end >= name_idx + 1:
+            result["headline"] = " ".join(
+                l.strip() for l in lines[name_idx + 1: headline_end + 1]
+            ).strip()
+    return result
+
+
+def _name_from_profile_slug(lines: list, profile_url: str):
+    """
+    Matches a line against the profile URL slug, which LinkedIn derives from
+    the person's name. This is far more dependable than guessing by position:
+    many exports lead with a sidebar (Contact, Top Skills, Languages) whose
+    entries look exactly like short names, which is how a profile ends up
+    filed under a person called "English".
+    """
+    if not profile_url:
+        return None
+    match = re.search(r"/in/([^/?#\s]+)", profile_url)
+    if not match:
+        return None
+    # Drop the trailing hash LinkedIn appends, keep the word-ish parts
+    tokens = [t for t in re.split(r"[-_]", match.group(1).lower()) if t and not re.search(r"\d", t)]
+    if not tokens:
+        return None
+
+    best, best_score = None, 0.0
+    for line in lines[:40]:
+        candidate = line.strip()
+        if not candidate or len(candidate) > 60:
+            continue
+        if "@" in candidate or "linkedin.com" in candidate.lower():
+            continue
+        words = [w.lower().strip(".,()") for w in candidate.split()]
+        if not words or len(words) > 6:
+            continue
+        matched = sum(1 for t in tokens if t in words)
+        score = matched / len(tokens)
+        if score > best_score:
+            best, best_score = candidate, score
+    # Require most of the slug to be accounted for before trusting it
+    return best if best_score >= 0.6 else None
+
+
+def _name_before_main_section(lines: list):
+    """
+    Walks back from the first main-content heading (Summary or Experience) to
+    find the person's name. In every export the block reads name, headline,
+    then location, immediately above that heading, so scanning backwards skips
+    the sidebar entirely.
+    """
+    anchor = None
+    for i, line in enumerate(lines):
+        if line.strip().lower() in ("summary", "experience"):
+            anchor = i
+            break
+    if anchor is None:
+        return None
+
+    for line in reversed(lines[max(0, anchor - 6): anchor]):
+        candidate = line.strip()
+        if not candidate or len(candidate) > 60:
+            continue
+        if "@" in candidate or "linkedin.com" in candidate.lower():
+            continue
+        if _looks_like_location(candidate):
+            continue
+        words = candidate.split()
+        # Real names run 2 to 4 words. Job headlines are longer, which is what
+        # separates "Mary Alexis Jackson" from the title sitting right below it.
+        if not (2 <= len(words) <= 4):
+            continue
+        if not all(re.match(r"^[A-Za-z.\-']+$", w) for w in words):
+            continue
+        if not candidate[0].isupper():
+            continue
+        return candidate
     return None
 
 
@@ -165,6 +406,10 @@ def extract_linkedin_profile_metadata(pdf_text: str) -> dict:
         "profile_url": None,
         "email": None
     }
+
+    # Must run before any URL matching, or a wrapped profile URL is captured
+    # truncated at the line break.
+    pdf_text = _rejoin_wrapped_urls(pdf_text)
 
     # Extract a contact email if the profile exposes one. LinkedIn PDF exports
     # put this in the Contact block near the top when the person has made it
@@ -227,96 +472,51 @@ def extract_linkedin_profile_metadata(pdf_text: str) -> dict:
         alpha_words = sum(1 for w in words if re.match(r"^[A-Za-z\.\-']+$", w))
         return alpha_words >= len(words) * 0.7
 
-    # ---- Strategy 1: First non-header line is the name ----
-    name_found = False
+    # ---- Name, headline and location ----
+    # Resolved together by anchoring on the first "Summary"/"Experience"
+    # heading and reading upwards. See extract_identity_block.
+    identity = extract_identity_block(lines)
     name_line_idx = 0
-    for i, line in enumerate(lines[:5]):
-        if looks_like_name(line):
-            metadata["name"] = line
-            name_line_idx = i
-            name_found = True
-            break
 
-    # ---- Strategy 2: If "Contact" appears in line 2-4, name is likely line before it ----
-    if not name_found:
-        for i, line in enumerate(lines[:6]):
-            if "contact" in line.lower() and i > 0:
-                candidate = lines[i - 1]
-                if looks_like_name(candidate):
-                    metadata["name"] = candidate
-                    name_line_idx = i - 1
-                    name_found = True
-                    break
-
-    # ---- Extract headline/title and company ----
-    # Look at lines after the name, before the first section header
-    headline_lines = []
-    for line in lines[name_line_idx + 1: name_line_idx + 8]:
-        # NOTE: the skip checks below must run BEFORE the section-header break.
-        # A profile URL line contains "linkedin.com", which is also a
-        # section-header keyword, so testing for the header first would abort
-        # the whole scan on the contact block and never reach the real headline
-        # sitting one line further down.
-
-        # Skip lines that look like URLs or email addresses
-        if "@" in line or "linkedin.com" in line.lower() or line.lower().startswith("www."):
-            continue
-        # Skip lines that are just numbers (connection counts, etc.)
-        if re.match(r"^\d+\s*(connections?|followers?)?$", line, re.IGNORECASE):
-            continue
-        # Skip phone numbers. LinkedIn's Contact block lists these right under
-        # the name, and without this they get mistaken for the job headline
-        # (e.g. a card showing "+1213... (Mobile)" where the title should be).
-        if re.search(r'(\+?\d[\d\s().-]{7,}\d)', line):
-            continue
-        if re.search(r'\b(mobile|phone|tel|cell)\b', line, re.IGNORECASE):
-            continue
-
-        # A genuine section header (Experience, Education, ...) means the
-        # headline block is over.
-        if is_section_header(line):
-            break
-
-        headline_lines.append(line)
-
-    if headline_lines:
-        metadata["current_title"] = headline_lines[0]
-
-        # Company, in order of how trustworthy the source is:
-        #
-        # 1. An explicit "at <Company>" inside the headline.
-        # 2. The Experience section. LinkedIn exports list the company name
-        #    first, then the role, then the dates, so the line right after
-        #    the "Experience" heading is the current employer. This is the
-        #    reliable one: plenty of headlines are just a job title with no
-        #    company in them at all.
-        # 3. The second headline line, but only when it isn't obviously a
-        #    location. LinkedIn puts the person's location directly under
-        #    the headline, which is how a profile ends up filed under a
-        #    company called "United States".
-        company_match = re.search(r"\bat\s+(.+)$", headline_lines[0], re.IGNORECASE)
-        if company_match:
-            metadata["company"] = company_match.group(1).strip()
+    if identity["name"]:
+        metadata["name"] = identity["name"]
+        name_line_idx = lines.index(identity["name"]) if identity["name"] in lines else 0
+        if identity["headline"]:
+            metadata["current_title"] = identity["headline"]
+        if identity["location"]:
+            metadata["location"] = identity["location"]
+    else:
+        # Fallbacks for exports that carry no Summary/Experience heading at all.
+        slug_name = _name_from_profile_slug(lines, metadata["profile_url"])
+        if slug_name and slug_name in lines:
+            metadata["name"] = slug_name
+            name_line_idx = lines.index(slug_name)
         else:
-            experience_company = _extract_company_from_experience(lines)
-            if experience_company:
-                metadata["company"] = experience_company
-            elif len(headline_lines) > 1:
-                potential_company = headline_lines[1]
-                if len(potential_company) < 80 and not _looks_like_location(potential_company):
-                    metadata["company"] = potential_company
+            for i, line in enumerate(lines[:8]):
+                if _looks_like_person_name(line) and not is_section_header(line):
+                    metadata["name"] = line
+                    name_line_idx = i
+                    break
+        # Best-effort headline from the line right below whatever name we found
+        if not metadata["current_title"] and name_line_idx + 1 < len(lines):
+            candidate = lines[name_line_idx + 1]
+            if not is_section_header(candidate) and "@" not in candidate:
+                metadata["current_title"] = candidate
 
-    # ---- Extract location ----
-    # Reuses the same shared helper the company fallback uses, so a line is
-    # never treated as a location in one place and an employer in another.
-    for line in lines[name_line_idx + 1: name_line_idx + 10]:
-        if is_section_header(line):
-            continue
-        if "@" in line or "linkedin.com" in line.lower():
-            continue
-        if _looks_like_location(line):
-            metadata["location"] = line
-            break
+    # ---- Company ----
+    # Ordered by how trustworthy the source is:
+    #   1. An explicit "at <Company>" inside the headline.
+    #   2. The Experience section, where each entry runs company, role, dates.
+    #      This is the dependable one, because plenty of headlines are a bare
+    #      job title with no employer named in them at all.
+    title_text = metadata["current_title"] or ""
+    company_match = re.search(r"at\s+([^|@]+)$", title_text, re.IGNORECASE)
+    if company_match:
+        metadata["company"] = company_match.group(1).strip()
+    else:
+        experience_company = _extract_company_from_experience(lines)
+        if experience_company:
+            metadata["company"] = experience_company
 
     # ---- Extract connection count ----
     conn_match = re.search(r"(\d+)\+?\s*connections?", pdf_text, re.IGNORECASE)
