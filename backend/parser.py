@@ -73,6 +73,80 @@ def parse_pdf_text(file_bytes: bytes) -> str:
         raise ValueError(f"Failed to parse PDF: {str(e)}")
 
 
+_US_STATES = [
+    "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
+    "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho",
+    "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana",
+    "maine", "maryland", "massachusetts", "michigan", "minnesota",
+    "mississippi", "missouri", "montana", "nebraska", "nevada",
+    "new hampshire", "new jersey", "new mexico", "new york",
+    "north carolina", "north dakota", "ohio", "oklahoma", "oregon",
+    "pennsylvania", "rhode island", "south carolina", "south dakota",
+    "tennessee", "texas", "utah", "vermont", "virginia", "washington",
+    "west virginia", "wisconsin", "wyoming",
+]
+
+_COUNTRIES = [
+    "united states", "united states of america", "usa", "india", "canada",
+    "united kingdom", "uk", "australia", "germany", "france", "singapore",
+    "japan", "china", "brazil", "netherlands", "ireland", "israel",
+    "south korea", "sweden", "spain", "italy", "mexico", "poland",
+    "switzerland", "remote",
+]
+
+
+def _looks_like_location(text: str) -> bool:
+    """
+    True when a line reads as a place rather than an employer. LinkedIn puts
+    the location immediately under the headline, exactly where a company name
+    would otherwise sit, so this guard keeps "United States" from being stored
+    as someone's employer.
+    """
+    if not text:
+        return False
+    lowered = text.strip().lower().rstrip(".")
+
+    if lowered in _COUNTRIES or lowered in _US_STATES:
+        return True
+    if "area" in lowered or lowered.startswith("greater ") or "metro" in lowered:
+        return True
+    # "City, ST" / "City, Country" shapes
+    if "," in lowered:
+        parts = [p.strip() for p in lowered.split(",")]
+        if any(p in _US_STATES or p in _COUNTRIES for p in parts):
+            return True
+        # Two-letter state abbreviation as the last part, e.g. "Austin, TX"
+        if len(parts) >= 2 and len(parts[-1]) == 2 and parts[-1].isalpha():
+            return True
+    return False
+
+
+def _extract_company_from_experience(lines: list) -> str:
+    """
+    Pulls the current employer out of the Experience section. LinkedIn PDF
+    exports order each entry as company, then role, then the date range, so
+    the first usable line after the "Experience" heading is the employer.
+    """
+    for i, line in enumerate(lines):
+        if line.strip().lower() != "experience":
+            continue
+        for candidate in lines[i + 1: i + 5]:
+            c = candidate.strip()
+            if not c:
+                continue
+            # Page furniture and date lines are not company names
+            if re.match(r"^page\s+\d+\s+of\s+\d+$", c, re.IGNORECASE):
+                continue
+            if re.match(r"^[\d(]", c):
+                continue
+            if re.match(r"^(january|february|march|april|may|june|july|august|september|october|november|december)\b", c, re.IGNORECASE):
+                continue
+            if len(c) > 80:
+                continue
+            return c
+    return None
+
+
 def extract_linkedin_profile_metadata(pdf_text: str) -> dict:
     """
     Extracts basic candidate profile fields from LinkedIn 'Save to PDF' text.
@@ -207,69 +281,42 @@ def extract_linkedin_profile_metadata(pdf_text: str) -> dict:
 
     if headline_lines:
         metadata["current_title"] = headline_lines[0]
-        # Look for "at [Company]" pattern in headline
+
+        # Company, in order of how trustworthy the source is:
+        #
+        # 1. An explicit "at <Company>" inside the headline.
+        # 2. The Experience section. LinkedIn exports list the company name
+        #    first, then the role, then the dates, so the line right after
+        #    the "Experience" heading is the current employer. This is the
+        #    reliable one: plenty of headlines are just a job title with no
+        #    company in them at all.
+        # 3. The second headline line, but only when it isn't obviously a
+        #    location. LinkedIn puts the person's location directly under
+        #    the headline, which is how a profile ends up filed under a
+        #    company called "United States".
         company_match = re.search(r"\bat\s+(.+)$", headline_lines[0], re.IGNORECASE)
         if company_match:
             metadata["company"] = company_match.group(1).strip()
-        elif len(headline_lines) > 1:
-            # Second headline line is often the company name
-            potential_company = headline_lines[1]
-            # Only assign if it's short enough to be a company name
-            if len(potential_company) < 80:
-                metadata["company"] = potential_company
+        else:
+            experience_company = _extract_company_from_experience(lines)
+            if experience_company:
+                metadata["company"] = experience_company
+            elif len(headline_lines) > 1:
+                potential_company = headline_lines[1]
+                if len(potential_company) < 80 and not _looks_like_location(potential_company):
+                    metadata["company"] = potential_company
 
     # ---- Extract location ----
-    # LinkedIn PDFs often place location near the top, identified by patterns like:
-    # "City, State", "City, Country", "Greater X Area", or common location suffixes
-    location_patterns = [
-        r"(?:greater\s+)?[\w\s]+,\s*[\w\s]+(?:\s+area)?",  # City, State/Country
-        r"[\w\s]+\s+(?:area|metro|region)",                  # X Area/Metro
-    ]
-    us_states = [
-        "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
-        "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho",
-        "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana",
-        "maine", "maryland", "massachusetts", "michigan", "minnesota",
-        "mississippi", "missouri", "montana", "nebraska", "nevada",
-        "new hampshire", "new jersey", "new mexico", "new york",
-        "north carolina", "north dakota", "ohio", "oklahoma", "oregon",
-        "pennsylvania", "rhode island", "south carolina", "south dakota",
-        "tennessee", "texas", "utah", "vermont", "virginia", "washington",
-        "west virginia", "wisconsin", "wyoming",
-        # Abbreviations
-        "al", "ak", "az", "ar", "ca", "co", "ct", "de", "fl", "ga",
-        "hi", "id", "il", "in", "ia", "ks", "ky", "la", "me", "md",
-        "ma", "mi", "mn", "ms", "mo", "mt", "ne", "nv", "nh", "nj",
-        "nm", "ny", "nc", "nd", "oh", "ok", "or", "pa", "ri", "sc",
-        "sd", "tn", "tx", "ut", "vt", "va", "wa", "wv", "wi", "wy"
-    ]
-    countries = [
-        "united states", "usa", "india", "canada", "united kingdom", "uk",
-        "australia", "germany", "france", "singapore", "japan", "china",
-        "brazil", "netherlands", "ireland", "israel", "south korea", "sweden"
-    ]
-
+    # Reuses the same shared helper the company fallback uses, so a line is
+    # never treated as a location in one place and an employer in another.
     for line in lines[name_line_idx + 1: name_line_idx + 10]:
-        lowered = line.lower()
         if is_section_header(line):
             continue
-        if "@" in line or "linkedin.com" in lowered:
+        if "@" in line or "linkedin.com" in line.lower():
             continue
-
-        # Check for "area" or "greater" patterns
-        if "area" in lowered or "greater" in lowered:
+        if _looks_like_location(line):
             metadata["location"] = line
             break
-
-        # Check for "City, State" or "City, Country" patterns
-        if "," in line:
-            parts = [p.strip().lower() for p in line.split(",")]
-            for part in parts:
-                if part in us_states or part in countries:
-                    metadata["location"] = line
-                    break
-            if metadata["location"]:
-                break
 
     # ---- Extract connection count ----
     conn_match = re.search(r"(\d+)\+?\s*connections?", pdf_text, re.IGNORECASE)
