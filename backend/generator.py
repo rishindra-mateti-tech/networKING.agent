@@ -859,10 +859,16 @@ def generate_outreach_email(
         "proves nothing because anyone can type it. Prove it by being specific instead.\n\n"
 
         "THE REST OF THE EMAIL:\n"
-        "- Subject line: 3 to 7 words, sentence case, concrete, and about THEM or the actual topic, never "
-        "about you wanting something. It should read like a colleague's subject line, not a campaign. "
-        "Never use: 'Exciting Opportunity', 'Quick Question', 'Reaching Out', 'Connecting', 'Introduction', "
-        "exclamation marks, or emoji.\n"
+        "- Subject line: write it LAST, after the body exists, and make it the headline of the specific "
+        "point the email actually makes. It must preview the real question or idea inside, not describe "
+        "the recipient's job. 'building developer tools at console' is a label, it tells them something "
+        "they already know about themselves and gives no reason to open. If the email asks where they draw "
+        "the line between backend and client logic, the subject is about THAT.\n"
+        "  Test it: reading only the subject, could they guess what the email asks? And does the subject "
+        "connect directly to the first sentence of the body? If the subject and the opening line are about "
+        "different things, the email feels stitched together and gets closed.\n"
+        "  3 to 7 words, sentence case, concrete. Never use: 'Exciting Opportunity', 'Quick Question', "
+        "'Reaching Out', 'Connecting', 'Introduction', exclamation marks, or emoji.\n"
         "- One line of credibility, maximum, and only the part relevant to what you just said. Not a resume.\n"
         "- The ask must be small, singular, and answerable in two sentences without scheduling anything. "
         "One ask per email.\n"
@@ -897,16 +903,17 @@ def generate_outreach_email(
         "CALIBRATION, showing the difference the opening line makes.\n\n"
 
         "WEAK, because it leads with the sender and could be sent to anyone:\n"
-        "  Subject: Software Engineering Opportunities\n"
+        "  Subject: building developer tools at console\n"
         "  'Hi Adithya, I'm Rishindra, a CS Master's student at Wright State and a software engineer "
         "building full-stack AI systems at ZUZU.AI. I noticed your work spanning native iOS and web "
         "frameworks like React and Vue while building developer tools at Console...'\n"
         "  Why it fails: the first fourteen words are about the sender. The observation is a list of "
         "technologies scraped from a profile, not a thought. Nothing here is unanswerable, so nothing "
-        "gets answered.\n\n"
+        "gets answered. And the subject just restates the recipient's own job back at them, which tells "
+        "them nothing they do not know and previews none of the actual question below.\n\n"
 
-        "STRONG, opening on a question only this person can answer:\n"
-        "  Subject: keeping iOS and web in sync at Console\n"
+        "STRONG, opening on a question only this person can answer, with a subject that previews it:\n"
+        "  Subject: where you draw the shared-logic line\n"
         "  'Hi Adithya, when you're shipping a developer tool across native iOS and web at the same time, "
         "where do you draw the line on shared logic? I keep landing on duplicating it and regretting it "
         "about a month later.\n\n"
@@ -915,7 +922,8 @@ def generate_outreach_email(
         "  If you have a minute, I'd genuinely like to know how Console handles it. No worries if not.'\n"
         "  Why it works: the first sentence is a real technical question aimed at their actual daily "
         "problem. It admits something ('regretting it') which reads human. The credential is one line and "
-        "arrives only after the hook. The ask costs them two sentences.\n\n"
+        "arrives only after the hook. The ask costs them two sentences. And the subject is the headline of "
+        "that same question, so opening the email delivers exactly what the subject promised.\n\n"
 
         "Match the STRONG pattern. Never the WEAK one."
     )
@@ -959,9 +967,15 @@ def generate_outreach_email(
     opening line on that. If the only honest answer is "not much", use the honest cold open and keep the
     whole email under 70 words rather than padding it with invented familiarity.
 
+    Write the body first, then write the subject from whatever the body actually ended up asking.
+
     Then check your draft against these, and rewrite if any fail:
       - Does the first sentence mention the sender? If yes, rewrite it.
       - Could this exact opening line be sent to a different person unchanged? If yes, it is not specific enough.
+      - Does the subject preview the specific question the body asks, rather than describing the recipient's
+        job or company? If someone read only the subject, could they guess what is being asked?
+      - Do the subject and the first sentence point at the same thing? If they are about different topics,
+        rewrite the subject to match the body.
       - Is there a real question or unresolved thread that makes replying feel natural?
       - Is the body under 130 words?
       - Are there any em dashes? There must be none.
