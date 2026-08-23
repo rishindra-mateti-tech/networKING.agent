@@ -136,6 +136,14 @@ class SettingUpdateBatch(BaseModel):
 class AnalyticsQuestion(BaseModel):
     question: str
 
+class TwinChatTurn(BaseModel):
+    role: str          # 'user' or 'agent'
+    content: str
+
+class TwinChatMessage(BaseModel):
+    message: str
+    history: List[TwinChatTurn] = []
+
 class SettingOut(BaseModel):
     id: int
     user_id: int

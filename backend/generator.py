@@ -917,6 +917,91 @@ def generate_outreach_email(
         return {"subject": "", "body": f"Failed to generate email: {e}"}
 
 
+def generate_twin_understanding(api_key: str, twin_profile: str) -> str:
+    """
+    Plays back, in plain language, what the system actually understands about
+    the user from everything they have given it. This exists so the user can
+    catch a wrong reading before it quietly shapes hundreds of messages, which
+    is otherwise invisible until a draft says something untrue about them.
+    """
+    system_instruction = (
+        "You are summarising what you understand about one person, addressed directly to them, "
+        "so they can check it and correct anything wrong. Write as 'You are...', not third person.\n"
+        "Only state what the source material supports. Where something important is missing or "
+        "ambiguous, say so plainly instead of filling the gap with a guess, and say what would "
+        "sharpen it. Being wrong here is worse than being incomplete, because everything you write "
+        "later is built on this.\n"
+        "Plain prose in short paragraphs, no headers, no bullet lists, under 220 words. "
+        "Never use an em dash or en dash. No filler openers, start with the substance."
+    )
+
+    prompt = f"""
+    Here is everything currently known about this person:
+    {twin_profile}
+
+    Write back what you understand about them: what they do, what they are looking for,
+    what they can credibly claim, and how they come across in writing. Then, in one short
+    closing paragraph, name anything that is unclear or missing that would make your
+    outreach on their behalf noticeably better.
+    """
+
+    try:
+        return clean_unicode_text(_call_gemini(api_key, system_instruction, prompt).strip())
+    except Exception as e:
+        return f"Could not generate the summary: {e}"
+
+
+def chat_about_twin_profile(api_key: str, twin_profile: str, history: list, message: str) -> dict:
+    """
+    Conversational way to correct or extend the profile. Returns both a reply
+    and any durable facts worth persisting, so the conversation actually
+    changes future output rather than being a throwaway chat window.
+    """
+    system_instruction = (
+        "You are helping one person tell you about themselves so you can represent them accurately "
+        "in networking outreach. Be curious and specific. Ask about the things that would most "
+        "change how you write on their behalf: what they actually built and their part in it, what "
+        "they want next, what they would rather not claim, and how formal they want to sound.\n"
+        "Ask one question at a time. Keep replies under 90 words. Never use an em dash or en dash. "
+        "No AI-cliche phrasing, no 'great question', no restating what they just said back to them.\n\n"
+        "Return ONLY raw JSON with these fields:\n"
+        '  "reply": what you say back to them\n'
+        '  "learned": a durable, self-contained fact worth remembering permanently, written in third '
+        'person (e.g. "Led the retrieval pipeline rewrite at ZUZU.AI, owning it end to end"). '
+        'Use an empty string when the message carried nothing new worth keeping, such as a greeting '
+        'or a question directed at you.'
+    )
+
+    history_text = ""
+    for turn in (history or [])[-10:]:
+        who = "Them" if turn.get("role") == "user" else "You"
+        history_text += f"{who}: {turn.get('content', '')}\n"
+
+    prompt = f"""
+    WHAT YOU ALREADY KNOW ABOUT THEM:
+    {twin_profile}
+
+    CONVERSATION SO FAR:
+    {history_text or "(this is the first message)"}
+
+    THEIR NEW MESSAGE:
+    {message}
+
+    Reply to them, and capture anything durable worth remembering.
+    Return ONLY raw JSON, no markdown fences.
+    """
+
+    try:
+        raw = _call_gemini(api_key, system_instruction, prompt, json_mode=True)
+        data = json.loads(_strip_json_codeblock(raw))
+        return {
+            "reply": clean_unicode_text(data.get("reply", "")).strip(),
+            "learned": clean_unicode_text(data.get("learned", "")).strip(),
+        }
+    except Exception as e:
+        return {"reply": f"Something went wrong on my side: {e}", "learned": ""}
+
+
 def answer_analytics_question(api_key: str, question: str, analytics_context: str) -> str:
     """
     Free-form Q&A over the user's own outreach data. The caller serializes the

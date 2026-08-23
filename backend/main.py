@@ -19,6 +19,8 @@ from generator import (
     analyze_conversation_screenshot,
     generate_outreach_email,
     answer_analytics_question,
+    generate_twin_understanding,
+    chat_about_twin_profile,
 )
 from twin_agent import compile_twin_agent_profile
 
@@ -138,7 +140,7 @@ def register(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
         "portfolio_url", "linkedin_url", "telegram_token",
         "telegram_chat_id", "slack_webhook_url", "pacing_interval_minutes",
         "job_search_status", "target_roles", "learning_goals", "tone_examples",
-        "email_client_preference"
+        "email_client_preference", "twin_understanding", "twin_extra_notes"
     ]
     for key in basic_keys:
         default_val = "15" if key == "pacing_interval_minutes" else ""
@@ -223,6 +225,79 @@ async def upload_resume(file: UploadFile = File(...), current_user: models.User 
         
     db.commit()
     return {"message": "Resume uploaded and compiled successfully.", "char_count": len(resume_text)}
+
+def _get_active_key_or_400(db: Session, user_id: int) -> models.ApiKey:
+    key = db.query(models.ApiKey).filter(
+        models.ApiKey.user_id == user_id,
+        models.ApiKey.is_active == True
+    ).first()
+    if not key:
+        raise HTTPException(status_code=400, detail="No active API key set. Add a Gemini key under API Key Workers first.")
+    return key
+
+
+def _upsert_setting(db: Session, user_id: int, key: str, value: str):
+    setting = db.query(models.Setting).filter(
+        models.Setting.user_id == user_id,
+        models.Setting.key == key
+    ).first()
+    if setting:
+        setting.value = value
+        setting.updated_at = datetime.datetime.utcnow()
+    else:
+        db.add(models.Setting(user_id=user_id, key=key, value=value))
+    db.commit()
+
+
+@app.post("/api/settings/twin-understanding/generate")
+def generate_understanding(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Plays back what the system understands about the user, so a wrong reading
+    gets caught here rather than silently shaping every message it writes.
+    Stored as plain text in settings.
+    """
+    api_key_record = _get_active_key_or_400(db, current_user.id)
+    summary = generate_twin_understanding(
+        api_key=api_key_record.key_value,
+        twin_profile=compile_twin_agent_profile(db, current_user.id),
+    )
+    _upsert_setting(db, current_user.id, "twin_understanding", summary)
+    return {"understanding": summary}
+
+
+@app.post("/api/settings/twin-chat")
+def twin_chat(
+    payload: schemas.TwinChatMessage,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Conversational way to teach the agent about yourself. Anything durable it
+    picks up is appended to twin_extra_notes, so the conversation actually
+    changes future output instead of being a throwaway chat.
+    """
+    api_key_record = _get_active_key_or_400(db, current_user.id)
+
+    result = chat_about_twin_profile(
+        api_key=api_key_record.key_value,
+        twin_profile=compile_twin_agent_profile(db, current_user.id),
+        history=[{"role": t.role, "content": t.content} for t in payload.history],
+        message=payload.message,
+    )
+
+    if result["learned"]:
+        existing = db.query(models.Setting).filter(
+            models.Setting.user_id == current_user.id,
+            models.Setting.key == "twin_extra_notes"
+        ).first()
+        prior = (existing.value or "").strip() if existing else ""
+        # Plain newline-delimited text, no JSON, to keep it small and readable
+        # (and editable by hand in the same textarea as everything else).
+        merged = f"{prior}\n- {result['learned']}".strip() if prior else f"- {result['learned']}"
+        _upsert_setting(db, current_user.id, "twin_extra_notes", merged)
+
+    return {"reply": result["reply"], "learned": result["learned"]}
+
 
 @app.post("/api/settings/test-telegram")
 async def test_telegram_setting(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -501,6 +576,9 @@ def update_connection_status(connection_id: int, payload: schemas.ConnectionUpda
         conn.sent_at = datetime.datetime.utcnow()
     if payload.status == "replied" and conn.replied_at is None:
         conn.replied_at = datetime.datetime.utcnow()
+        # A reply is the most valuable signal in the pipeline, so surface
+        # it automatically instead of relying on the user to star it.
+        conn.is_starred = True
     db.commit()
     db.refresh(conn)
     return conn
@@ -594,6 +672,7 @@ def create_interaction_log(connection_id: int, log_data: schemas.InteractionLogC
         conn.status = "replied"
         if conn.replied_at is None:
             conn.replied_at = datetime.datetime.utcnow()
+            conn.is_starred = True
     elif log_data.sender == "user" and conn.status == "replied":
         conn.status = "follow_up"
 
@@ -661,6 +740,7 @@ async def upload_conversation_screenshot(
     conn.status = "replied"
     if conn.replied_at is None:
         conn.replied_at = datetime.datetime.utcnow()
+        conn.is_starred = True
 
     db.commit()
     db.refresh(new_log)

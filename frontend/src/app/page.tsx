@@ -57,6 +57,16 @@ export default function Home() {
   const [resumeUploadLoading, setResumeUploadLoading] = useState(false);
   const [settingsSaveLoading, setSettingsSaveLoading] = useState(false);
 
+  // TwinAgent understanding + teach-me chat
+  const [twinUnderstanding, setTwinUnderstanding] = useState("");
+  const [twinExtraNotes, setTwinExtraNotes] = useState("");
+  const [showUnderstanding, setShowUnderstanding] = useState(false);
+  const [understandingLoading, setUnderstandingLoading] = useState(false);
+  const [twinChatOpen, setTwinChatOpen] = useState(false);
+  const [twinChatHistory, setTwinChatHistory] = useState<{role: string; content: string}[]>([]);
+  const [twinChatInput, setTwinChatInput] = useState("");
+  const [twinChatSending, setTwinChatSending] = useState(false);
+
   // Form Inputs: API Keys
   const [newKeyVal, setNewKeyVal] = useState("");
   const [newKeyRole, setNewKeyRole] = useState<"primary" | "standby">("primary");
@@ -89,6 +99,22 @@ export default function Home() {
   const [queueStatus, setQueueStatus] = useState<{pending: number, processing: number, completed: number, failed: number, active_keys: number} | null>(null);
   const [intelTab, setIntelTab] = useState<"profile" | "company" | "strategy" | "personalization">("profile");
   const [showContextSummary, setShowContextSummary] = useState(false);
+
+  // In-app confirmation, replacing window.confirm. The native dialog is
+  // chrome-styled, shows the raw deployment hostname, and cannot be themed.
+  const [confirmDialog, setConfirmDialog] = useState<{
+    message: string;
+    detail?: string;
+    confirmLabel: string;
+    onConfirm: () => void;
+  } | null>(null);
+
+  // Toasts, replacing window.alert for the same reason.
+  const [toast, setToast] = useState<{ text: string; tone: "ok" | "error" } | null>(null);
+  const showToast = (text: string, tone: "ok" | "error" = "ok") => {
+    setToast({ text, tone });
+    setTimeout(() => setToast(null), 4000);
+  };
 
   // References
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -291,6 +317,8 @@ export default function Home() {
         setTelegramChatId(mapped["telegram_chat_id"] || "");
         setSlackWebhookUrl(mapped["slack_webhook_url"] || "");
         setEmailClientPreference(mapped["email_client_preference"] || "gmail");
+        setTwinUnderstanding(mapped["twin_understanding"] || "");
+        setTwinExtraNotes(mapped["twin_extra_notes"] || "");
         setPacingInterval(mapped["pacing_interval_minutes"] || "15");
       }
     } catch (e) {
@@ -359,6 +387,8 @@ export default function Home() {
         { key: "learning_goals", value: learningGoals },
         { key: "tone_examples", value: toneExamples },
         { key: "resume_latex", value: latexCode },
+        { key: "twin_understanding", value: twinUnderstanding },
+        { key: "twin_extra_notes", value: twinExtraNotes },
         { key: "telegram_token", value: telegramToken },
         { key: "telegram_chat_id", value: telegramChatId },
         { key: "slack_webhook_url", value: slackWebhookUrl },
@@ -374,11 +404,11 @@ export default function Home() {
         body: JSON.stringify(batch)
       });
       if (res.ok) {
-        alert("TwinAgent configuration saved successfully!");
+        showToast("TwinAgent configuration saved.");
         fetchSettings();
       }
     } catch (e) {
-      alert("Failed to save settings");
+      showToast("Failed to save settings.", "error");
     } finally {
       setSettingsSaveLoading(false);
     }
@@ -398,14 +428,14 @@ export default function Home() {
         body: formData
       });
       if (res.ok) {
-        alert("Resume PDF uploaded and parsed successfully!");
+        showToast("Resume uploaded and parsed.");
         fetchSettings();
       } else {
         const d = await res.json();
-        alert(d.detail || "Upload failed");
+        showToast(d.detail || "Upload failed.", "error");
       }
     } catch (err) {
-      alert("Failed to upload resume");
+      showToast("Failed to upload resume.", "error");
     } finally {
       setResumeUploadLoading(false);
       setResumeFile(null);
@@ -449,7 +479,15 @@ export default function Home() {
   };
 
   const handleDeleteKey = async (keyId: number) => {
-    if (!confirm("Are you sure you want to remove this API key?")) return;
+    setConfirmDialog({
+      message: "Remove this API key?",
+      detail: "Any worker currently running on it will stop.",
+      confirmLabel: "Remove key",
+      onConfirm: () => doDeleteKey(keyId),
+    });
+  };
+
+  const doDeleteKey = async (keyId: number) => {
     try {
       const res = await fetchWithAuth(`/api/keys/${keyId}`, {
         method: "DELETE"
@@ -551,7 +589,7 @@ export default function Home() {
           });
           if (!res.ok) {
             const d = await res.json();
-            alert(d.detail || "Failed to process target details");
+            showToast(d.detail || "Failed to process target details.", "error");
             setConnUploadLoading(false);
             return;
           }
@@ -598,11 +636,11 @@ export default function Home() {
           fetchConnections();
         } else {
           const d = await res.json();
-          alert(d.detail || "Failed to create target manually");
+          showToast(d.detail || "Failed to create target manually.", "error");
         }
       }
     } catch (err) {
-      alert("Failed to add connection");
+      showToast("Failed to add connection.", "error");
     } finally {
       setConnUploadLoading(false);
     }
@@ -621,7 +659,15 @@ export default function Home() {
   };
 
   const handleDeleteConnection = async (connId: number) => {
-    if (!confirm("Remove this connection?")) return;
+    setConfirmDialog({
+      message: "Remove this connection?",
+      detail: "The generated drafts and conversation log go with it.",
+      confirmLabel: "Remove",
+      onConfirm: () => doDeleteConnection(connId),
+    });
+  };
+
+  const doDeleteConnection = async (connId: number) => {
     try {
       const res = await fetchWithAuth(`/api/connections/${connId}`, {
         method: "DELETE"
@@ -713,12 +759,61 @@ export default function Home() {
         fetchConnections();
       } else {
         const data = await res.json().catch(() => ({}));
-        alert(data.detail || "Failed to analyze screenshot. Make sure you have an active API key configured.");
+        showToast(data.detail || "Failed to analyze screenshot. Add an active API key first.", "error");
       }
     } catch (e) {
       console.error(e);
     } finally {
       setScreenshotUploadLoading(false);
+    }
+  };
+
+  const handleGenerateUnderstanding = async () => {
+    setUnderstandingLoading(true);
+    try {
+      const res = await fetchWithAuth("/api/settings/twin-understanding/generate", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setTwinUnderstanding(data.understanding);
+        setShowUnderstanding(true);
+      } else {
+        showToast(data.detail || "Could not generate the summary.", "error");
+      }
+    } catch (e: any) {
+      showToast(e.message || "Network error.", "error");
+    } finally {
+      setUnderstandingLoading(false);
+    }
+  };
+
+  const handleTwinChatSend = async () => {
+    const msg = twinChatInput.trim();
+    if (!msg) return;
+    const nextHistory = [...twinChatHistory, { role: "user", content: msg }];
+    setTwinChatHistory(nextHistory);
+    setTwinChatInput("");
+    setTwinChatSending(true);
+    try {
+      const res = await fetchWithAuth("/api/settings/twin-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: msg, history: twinChatHistory }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setTwinChatHistory([...nextHistory, { role: "agent", content: data.reply }]);
+        if (data.learned) {
+          setTwinExtraNotes(prev => (prev ? `${prev}\n- ${data.learned}` : `- ${data.learned}`));
+          showToast("Noted that about you.");
+        }
+      } else {
+        setTwinChatHistory(nextHistory);
+        showToast(data.detail || "Could not reach the agent.", "error");
+      }
+    } catch (e: any) {
+      showToast(e.message || "Network error.", "error");
+    } finally {
+      setTwinChatSending(false);
     }
   };
 
@@ -750,7 +845,7 @@ export default function Home() {
         fetchConnections();
         setExpandedUploadRow(connId);
       } else {
-        alert(data.detail || "Failed to generate email.");
+        showToast(data.detail || "Failed to generate email.", "error");
       }
     } catch (e) {
       console.error(e);
@@ -791,7 +886,7 @@ export default function Home() {
         if (selectedConnection?.id === connId) fetchThreadLogs(connId);
       } else {
         const data = await res.json().catch(() => ({}));
-        alert(data.detail || "Failed to analyze screenshot.");
+        showToast(data.detail || "Failed to analyze screenshot.", "error");
       }
     } catch (e) {
       console.error(e);
@@ -818,7 +913,7 @@ export default function Home() {
         const d = await res.json();
         setSuggestedReply(d.suggested_reply);
       } else {
-        alert("Failed to generate follow-up. Make sure you have configured active API keys.");
+        showToast("Failed to generate follow-up. Add an active API key first.", "error");
       }
     } catch (err) {
       console.error(err);
@@ -1244,21 +1339,32 @@ export default function Home() {
 
               {/* Status filter, doing the job the columns used to do */}
               <div className="flex flex-wrap items-center gap-1.5">
-                {[{ label: "All", keys: [] as string[] }, ...columns.map(c => ({ label: c.title, keys: [...c.statusKeys] }))].map(f => {
-                  const count = f.keys.length === 0
-                    ? filteredConnections.length
-                    : filteredConnections.filter(c => f.keys.includes(c.status)).length;
+                {[
+                  { label: "All", keys: [] as string[] },
+                  { label: "Starred", keys: [] as string[] },
+                  ...columns.map(c => ({ label: c.title, keys: [...c.statusKeys] })),
+                ].map(f => {
+                  const count =
+                    f.label === "Starred"
+                      ? filteredConnections.filter(c => c.is_starred).length
+                      : f.keys.length === 0
+                      ? filteredConnections.length
+                      : filteredConnections.filter(c => f.keys.includes(c.status)).length;
                   const isActive = statusGroupFilter === f.label;
+                  const isStarred = f.label === "Starred";
                   return (
                     <button
                       key={f.label}
                       onClick={() => setStatusGroupFilter(isActive ? "" : f.label)}
                       className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold border transition-colors cursor-pointer ${
                         isActive
-                          ? "bg-white/10 border-white/20 text-white"
+                          ? isStarred
+                            ? "bg-amber-400/15 border-amber-400/30 text-amber-300"
+                            : "bg-white/10 border-white/20 text-white"
                           : "bg-white/[0.02] border-white/10 text-zinc-400 hover:text-zinc-200"
                       }`}
                     >
+                      {isStarred && <Star size={10} fill={isActive ? "currentColor" : "none"} />}
                       {f.label}
                       <span className="text-[9px] font-mono text-zinc-500">{count}</span>
                     </button>
@@ -1270,7 +1376,9 @@ export default function Home() {
               <div className="space-y-2">
                 {(() => {
                   const activeFilter = columns.find(c => c.title === statusGroupFilter);
-                  const visible = activeFilter
+                  const visible = statusGroupFilter === "Starred"
+                    ? filteredConnections.filter(c => c.is_starred)
+                    : activeFilter
                     ? filteredConnections.filter(c => activeFilter.statusKeys.includes(c.status))
                     : filteredConnections;
 
@@ -1309,7 +1417,9 @@ export default function Home() {
                         )}
                       </div>
 
-                      {/* Signal chips */}
+                      {/* Signal chips. Colour carries the meaning here so the
+                          numbers are readable at a glance instead of being
+                          uniform low-contrast grey. */}
                       <div className="hidden md:flex items-center gap-1.5 shrink-0">
                         {conn.best_angle && (
                           <span className="text-[9px] font-semibold uppercase tracking-wider bg-white/5 text-zinc-400 border border-white/10 px-1.5 py-0.5 rounded">
@@ -1317,12 +1427,30 @@ export default function Home() {
                           </span>
                         )}
                         {conn.years_experience > 0 && (
-                          <span className="text-[9px] font-mono bg-white/5 text-zinc-400 px-1.5 py-0.5 rounded">
+                          <span
+                            title={`${conn.years_experience} years of experience`}
+                            className={`text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded border ${
+                              conn.years_experience >= 10
+                                ? "bg-violet-500/10 text-violet-300 border-violet-500/25"
+                                : conn.years_experience >= 5
+                                ? "bg-sky-500/10 text-sky-300 border-sky-500/25"
+                                : "bg-white/5 text-zinc-300 border-white/10"
+                            }`}
+                          >
                             {conn.years_experience}y
                           </span>
                         )}
                         {conn.networking_score && (
-                          <span className="text-[9px] font-mono bg-white/5 text-zinc-400 px-1.5 py-0.5 rounded">
+                          <span
+                            title={`Networking score ${conn.networking_score} out of 10`}
+                            className={`text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded border ${
+                              conn.networking_score >= 7.5
+                                ? "bg-[#4d8565]/15 text-[#8fc7a4] border-[#4d8565]/30"
+                                : conn.networking_score >= 5
+                                ? "bg-amber-500/10 text-amber-300 border-amber-500/25"
+                                : "bg-rose-500/10 text-rose-300 border-rose-500/25"
+                            }`}
+                          >
                             {conn.networking_score}/10
                           </span>
                         )}
@@ -1748,8 +1876,135 @@ export default function Home() {
               />
             </div>
 
+            {/* What the agent understood, so a wrong reading gets caught here
+                rather than silently shaping every message it writes. */}
+            <div className="bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-xl overflow-hidden">
+              <button
+                onClick={() => setShowUnderstanding(v => !v)}
+                className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-white/[0.02] transition-colors cursor-pointer"
+              >
+                <span className="flex items-center gap-2">
+                  <Sparkles size={15} className="text-[#4d8565]" />
+                  <span className="text-sm font-semibold text-white">What networKING.agent understands about you</span>
+                </span>
+                {showUnderstanding ? <ChevronDown size={15} className="text-zinc-500" /> : <ChevronRight size={15} className="text-zinc-500" />}
+              </button>
+
+              {showUnderstanding && (
+                <div className="px-5 pb-5 space-y-4 border-t border-white/5 pt-4">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <p className="text-[11px] text-zinc-400 max-w-lg">
+                      Read this before sending anything. Whatever is wrong here will be wrong in every
+                      message it writes for you. Edit it freely, your version takes priority over the resume.
+                    </p>
+                    <button
+                      onClick={handleGenerateUnderstanding}
+                      disabled={understandingLoading}
+                      className="bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-300 hover:text-white px-3 py-2 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5 shrink-0"
+                    >
+                      <RefreshCw size={12} className={understandingLoading ? "animate-spin" : ""} />
+                      {twinUnderstanding ? "Regenerate" : "Generate"}
+                    </button>
+                  </div>
+
+                  {twinUnderstanding ? (
+                    <textarea
+                      value={twinUnderstanding}
+                      onChange={e => setTwinUnderstanding(e.target.value)}
+                      rows={9}
+                      className="w-full bg-zinc-950/60 border border-white/10 rounded-lg p-4 text-xs text-zinc-200 leading-relaxed focus:outline-none focus:border-white/20"
+                    />
+                  ) : (
+                    <div className="text-center py-8 border border-dashed border-white/10 rounded-lg text-[11px] text-zinc-600 font-mono">
+                      {understandingLoading ? "Reading everything you've given it..." : "Nothing generated yet. Fill in your details above, then hit Generate."}
+                    </div>
+                  )}
+
+                  {/* Teach-me chat */}
+                  <div className="border-t border-white/5 pt-4">
+                    <button
+                      onClick={() => setTwinChatOpen(v => !v)}
+                      className="w-full flex items-center justify-between text-left cursor-pointer group"
+                    >
+                      <span className="flex items-center gap-2 text-xs font-semibold text-zinc-300 group-hover:text-white transition-colors">
+                        <MessageSquare size={13} className="text-[#4d8565]" />
+                        Tell it more about yourself
+                      </span>
+                      {twinChatOpen ? <ChevronDown size={13} className="text-zinc-500" /> : <ChevronRight size={13} className="text-zinc-500" />}
+                    </button>
+
+                    {twinChatOpen && (
+                      <div className="mt-3 space-y-3">
+                        <p className="text-[10px] text-zinc-500">
+                          Anything durable it picks up here gets saved and used in future messages.
+                        </p>
+
+                        <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                          {twinChatHistory.length === 0 && (
+                            <div className="text-center py-6 text-[10px] text-zinc-600 font-mono border border-dashed border-white/10 rounded-lg">
+                              Try: "I led the backend rewrite, not just contributed to it"
+                            </div>
+                          )}
+                          {twinChatHistory.map((turn, i) => (
+                            <div
+                              key={i}
+                              className={`p-2.5 rounded-lg text-[11px] leading-relaxed max-w-[88%] ${
+                                turn.role === "user"
+                                  ? "bg-white/5 border border-white/10 ml-auto text-zinc-200"
+                                  : "bg-[#4d8565]/10 border border-[#4d8565]/20 mr-auto text-zinc-200"
+                              }`}
+                            >
+                              {turn.content}
+                            </div>
+                          ))}
+                          {twinChatSending && (
+                            <div className="text-[10px] text-zinc-500 font-mono flex items-center gap-1.5">
+                              <Loader2 size={11} className="animate-spin" /> thinking
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={twinChatInput}
+                            onChange={e => setTwinChatInput(e.target.value)}
+                            onKeyDown={e => { if (e.key === "Enter" && !twinChatSending) handleTwinChatSend(); }}
+                            placeholder="Tell it something it got wrong, or something it's missing..."
+                            className="flex-1 bg-zinc-950/60 border border-white/10 rounded-lg px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-white/20"
+                          />
+                          <button
+                            onClick={handleTwinChatSend}
+                            disabled={twinChatSending || !twinChatInput.trim()}
+                            className="bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-300 hover:text-white px-4 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer disabled:opacity-40 shrink-0"
+                          >
+                            Send
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Accumulated facts, editable as plain text */}
+                  {twinExtraNotes && (
+                    <div className="border-t border-white/5 pt-4">
+                      <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-2">
+                        Extra context it has picked up
+                      </label>
+                      <textarea
+                        value={twinExtraNotes}
+                        onChange={e => setTwinExtraNotes(e.target.value)}
+                        rows={5}
+                        className="w-full bg-zinc-950/60 border border-white/10 rounded-lg p-3 text-[11px] text-zinc-300 leading-relaxed focus:outline-none focus:border-white/20 font-mono"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="flex justify-end pt-4">
-              <button 
+              <button
                 onClick={handleSaveSettings}
                 disabled={settingsSaveLoading}
                 className="bg-zinc-900 border border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-white hover:border-zinc-700 text-sm font-semibold px-6 py-3 rounded-lg transition-colors cursor-pointer shadow-lg disabled:opacity-50"
@@ -3044,6 +3299,48 @@ export default function Home() {
           </div>
         </div>
         </>
+      )}
+
+      {/* Confirmation dialog, in-app so it matches the rest of the product
+          instead of showing a browser chrome box with the raw hostname. */}
+      {confirmDialog && (
+        <>
+          <div
+            onClick={() => setConfirmDialog(null)}
+            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60]"
+          />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[61] w-[calc(100%-2rem)] max-w-sm bg-zinc-900 border border-white/10 rounded-2xl p-6 shadow-2xl">
+            <h3 className="text-base font-bold text-white">{confirmDialog.message}</h3>
+            {confirmDialog.detail && (
+              <p className="text-xs text-zinc-400 mt-2 leading-relaxed">{confirmDialog.detail}</p>
+            )}
+            <div className="flex justify-end gap-2 mt-6">
+              <button
+                onClick={() => setConfirmDialog(null)}
+                className="px-4 py-2 rounded-lg text-xs font-semibold text-zinc-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }}
+                className="px-4 py-2 rounded-lg text-xs font-bold text-rose-300 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 transition-colors cursor-pointer"
+              >
+                {confirmDialog.confirmLabel}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Toast, replacing window.alert */}
+      {toast && (
+        <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] px-4 py-3 rounded-xl border backdrop-blur-xl shadow-2xl text-xs font-semibold max-w-md ${
+          toast.tone === "error"
+            ? "bg-rose-950/80 border-rose-500/30 text-rose-200"
+            : "bg-[#1a2b21]/90 border-[#4d8565]/40 text-[#9fd4b4]"
+        }`}>
+          {toast.text}
+        </div>
       )}
 
       {/* 4. ADD OUTREACH TARGET DIALOG MODAL */}
