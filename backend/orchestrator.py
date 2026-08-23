@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import html
+import re
 import httpx
 from sqlalchemy.orm import Session
 
@@ -152,26 +153,95 @@ class QueueOrchestrator:
         finally:
             db.close()
 
-    async def _send_telegram_alert(self, token: str, chat_id: str, text: str):
-        """Dispatches an asynchronous Telegram notification."""
+    # Telegram rejects any single message over 4096 characters. A full outreach
+    # briefing (metrics plus five drafts) regularly lands around 4200, so it was
+    # being silently refused with a 400 and the user simply never got the alert.
+    TELEGRAM_LIMIT = 4096
+
+    @staticmethod
+    def _pack_blocks(blocks: list, limit: int) -> list:
+        """
+        Packs pre-formed blocks into as few messages as possible without ever
+        splitting inside a block. Blocks matter here because a draft is wrapped
+        in <code>...</code> that spans newlines, so cutting mid-block would
+        leave an unclosed tag and Telegram would reject the whole thing.
+        """
+        messages, current = [], ""
+        for block in blocks:
+            if not block:
+                continue
+
+            # A single oversized block still has to be broken up. Strip the HTML
+            # first so no tag can be left dangling, split on line boundaries, and
+            # hard-slice any line that is itself longer than the limit (a draft
+            # written as one long paragraph has no newline to split on).
+            if len(block) > limit:
+                if current:
+                    messages.append(current)
+                    current = ""
+                plain = re.sub(r"</?[a-zA-Z][^>]*>", "", block)
+                piece = ""
+                for line in plain.split("\n"):
+                    while len(line) > limit:
+                        if piece:
+                            messages.append(piece)
+                            piece = ""
+                        messages.append(line[:limit])
+                        line = line[limit:]
+                    if len(piece) + len(line) + 1 > limit:
+                        if piece:
+                            messages.append(piece)
+                        piece = line
+                    else:
+                        piece = f"{piece}\n{line}" if piece else line
+                if piece:
+                    current = piece
+                continue
+
+            if len(current) + len(block) + 2 > limit:
+                messages.append(current)
+                current = block
+            else:
+                current = f"{current}\n\n{block}" if current else block
+
+        if current:
+            messages.append(current)
+        # Telegram rejects an empty message, so never emit one
+        return [m for m in messages if m.strip()]
+
+    async def _send_telegram_alert(self, token: str, chat_id: str, text=None, blocks: list = None):
+        """
+        Dispatches a Telegram notification, splitting across several messages
+        when the content exceeds Telegram's per-message limit.
+        """
         token = token.strip() if token else ""
         chat_id = chat_id.strip() if chat_id else ""
         if not token or not chat_id:
             return
 
+        parts = self._pack_blocks(blocks if blocks is not None else [text or ""], self.TELEGRAM_LIMIT)
         url = f"https://api.telegram.org/bot{token}/sendMessage"
-        payload = {
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "HTML"
-        }
+
         try:
             async with httpx.AsyncClient() as client:
-                res = await client.post(url, json=payload, timeout=10.0)
-                if res.status_code == 200:
-                    print(f"[ORCHESTRATOR] Telegram notification sent successfully to chat {chat_id}.")
-                else:
-                    print(f"[ORCHESTRATOR] Telegram API error ({res.status_code}): {res.text}")
+                for idx, part in enumerate(parts, start=1):
+                    res = await client.post(
+                        url,
+                        json={"chat_id": chat_id, "text": part, "parse_mode": "HTML"},
+                        timeout=10.0,
+                    )
+                    if res.status_code == 200:
+                        print(f"[ORCHESTRATOR] Telegram message {idx}/{len(parts)} sent to chat {chat_id}.")
+                    else:
+                        # Retry once without HTML, since an unbalanced tag is the
+                        # most common cause of a 400 here and a plain-text alert
+                        # beats no alert at all.
+                        print(f"[ORCHESTRATOR] Telegram API error ({res.status_code}) on part {idx}: {res.text}")
+                        plain = re.sub(r"</?[a-zA-Z][^>]*>", "", part)
+                        retry = await client.post(
+                            url, json={"chat_id": chat_id, "text": plain}, timeout=10.0
+                        )
+                        print(f"[ORCHESTRATOR] Plain-text retry for part {idx}: {retry.status_code}")
         except Exception as e:
             print(f"[ORCHESTRATOR] Failed to send Telegram alert: {e}")
 
@@ -430,34 +500,40 @@ class QueueOrchestrator:
                                 safe_relationship = html.escape(raw_relationship)
                                 safe_featured = html.escape(raw_featured)
 
-                                telegram_text = (
-                                    f"✨ <b>Outreach Intelligence Ready for {safe_name}!</b>\n"
-                                    f"💼 <b>Role</b>: {safe_title} @ {safe_company}\n"
-                                    f"🏢 <b>Classification</b>: {company_class}\n"
-                                    f"{profile_url_block}\n"
-                                    f"🌟 <b>Networking Score</b>: {networking_score}/10\n"
-                                    f"📈 <b>Reply Probability</b>: {reply_probability}%\n"
-                                    f"💼 <b>Hiring Probability</b>: {hiring_probability}\n"
-                                    f"🔑 <b>Decision Maker</b>: {is_decision_maker}\n"
-                                    f"🤝 <b>Referral Potential</b>: {referral_potential}\n"
-                                    f"🧗 <b>Networking Difficulty</b>: {networking_difficulty}\n\n"
-                                    f"💡 <b>Conversation Starter</b>: {conversation_starter}\n"
-                                    f"⚠️ <b>Avoid</b>: {avoid_points}\n"
-                                    f"🎯 <b>Best Message Type</b>: {best_message_type}\n\n"
-                                    f"----------------------------\n"
-                                    f"📝 <b>REFERRAL DRAFT</b>\n<code>{safe_referral}</code>\n\n"
-                                    f"----------------------------\n"
-                                    f"📝 <b>COFFEE CHAT DRAFT</b>\n<code>{safe_coffee}</code>\n\n"
-                                    f"----------------------------\n"
-                                    f"📝 <b>TECHNICAL DRAFT</b>\n<code>{safe_technical}</code>\n\n"
-                                    f"----------------------------\n"
-                                    f"📝 <b>RELATIONSHIP BUILDING DRAFT</b>\n<code>{safe_relationship}</code>\n\n"
-                                    f"----------------------------\n"
-                                    f"📝 <b>FEATURED OUTREACH DRAFT (No Limit)</b>\n<code>{safe_featured}</code>\n\n"
-                                    f"----------------------------\n"
-                                    f"<i>Review, select & copy from your networKING dashboard.</i>"
+                                # Sent as discrete blocks rather than one string so
+                                # the splitter can never cut inside a <code> draft
+                                # and leave an unclosed tag.
+                                telegram_blocks = [
+                                    (
+                                        f"✨ <b>Outreach Intelligence Ready for {safe_name}!</b>\n"
+                                        f"💼 <b>Role</b>: {safe_title} @ {safe_company}\n"
+                                        f"🏢 <b>Classification</b>: {company_class}\n"
+                                        f"{profile_url_block}"
+                                        f"🌟 <b>Networking Score</b>: {networking_score}/10\n"
+                                        f"📈 <b>Reply Probability</b>: {reply_probability}%\n"
+                                        f"💼 <b>Hiring Probability</b>: {hiring_probability}\n"
+                                        f"🔑 <b>Decision Maker</b>: {is_decision_maker}\n"
+                                        f"🤝 <b>Referral Potential</b>: {referral_potential}\n"
+                                        f"🧗 <b>Networking Difficulty</b>: {networking_difficulty}\n\n"
+                                        f"💡 <b>Conversation Starter</b>: {conversation_starter}\n"
+                                        f"⚠️ <b>Avoid</b>: {avoid_points}\n"
+                                        f"🎯 <b>Best Message Type</b>: {best_message_type}"
+                                    ),
+                                ]
+                                for label, body in [
+                                    ("REFERRAL DRAFT", safe_referral),
+                                    ("COFFEE CHAT DRAFT", safe_coffee),
+                                    ("TECHNICAL DRAFT", safe_technical),
+                                    ("RELATIONSHIP BUILDING DRAFT", safe_relationship),
+                                    ("FEATURED OUTREACH DRAFT", safe_featured),
+                                ]:
+                                    if body:
+                                        telegram_blocks.append(f"📝 <b>{label}</b>\n<code>{body}</code>")
+                                telegram_blocks.append("<i>Review, select &amp; copy from your networKING dashboard.</i>")
+
+                                await self._send_telegram_alert(
+                                    telegram_token, telegram_chat_id, blocks=telegram_blocks
                                 )
-                                await self._send_telegram_alert(telegram_token, telegram_chat_id, telegram_text)
 
                             # --- Slack (mrkdwn) ---
                             if slack_webhook_url:
