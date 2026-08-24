@@ -619,37 +619,74 @@ def extract_resume_contact_info(resume_text: str) -> dict:
         url = re.sub(r'[\)\.\,\;\>]+$', '', github_match.group(0).strip())
         result["github_url"] = url if url.startswith("http") else "https://" + url
 
-    # Portfolio: first http(s) URL that isn't LinkedIn/GitHub. Genuinely
-    # best-effort, may be None.
-    for url_match in re.finditer(r'https?://[^\s\n]+', text, re.IGNORECASE):
-        url = re.sub(r'[\)\.\,\;\>]+$', '', url_match.group(0).strip())
-        lowered = url.lower()
-        if "linkedin.com" in lowered or "github.com" in lowered:
-            continue
-        result["portfolio_url"] = url
-        break
+    # Portfolio detection is the riskiest of these: resumes commonly list
+    # several project demo links (often on free hosts like vercel.app or
+    # netlify.app, exactly the same shape as a real portfolio link), and
+    # grabbing "the first URL that isn't LinkedIn/GitHub" would just as
+    # happily grab a project's deployment link as the person's actual site.
+    # So this is deliberately conservative: only trust a URL that either (a)
+    # sits next to an explicit "portfolio"/"website" label, or (b) appears in
+    # the header/contact block before any section heading, which is where a
+    # resume's own site link normally lives alongside the email and phone.
+    # Anything inside a "Projects" section is excluded outright. If neither
+    # signal is found, portfolio_url stays None rather than guessing.
+    section_headings = {
+        "experience", "work experience", "professional experience",
+        "education", "projects", "personal projects", "project experience",
+        "skills", "technical skills", "summary", "about", "certifications",
+        "publications", "awards", "honors", "volunteer", "interests",
+        "languages", "references", "contact",
+    }
+    portfolio_keyword_re = re.compile(r'\b(portfolio|personal (?:site|website)|my website|website)\b', re.IGNORECASE)
+    portfolio_tlds = r"(?:dev|io|me|app|xyz|tech|page|site|design|studio|works|codes|vercel\.app|netlify\.app|github\.io|pages\.dev)"
+    bare_domain_re = re.compile(rf'\b([a-zA-Z0-9](?:[a-zA-Z0-9-]{{0,61}}[a-zA-Z0-9])?\.{portfolio_tlds})(/[^\s]*)?\b')
 
-    # Resumes very often list a portfolio as a bare domain with no "http://"
-    # at all (e.g. "rishindra.dev", "myname.vercel.app"), which the scan
-    # above never matches. Fall back to a bare-domain scan restricted to TLDs
-    # that actually signal a personal site/portfolio, to avoid false-positive
-    # matches on ordinary prose (a generic .com/.org/.net bare word is too
-    # noisy to trust without a protocol).
-    if not result["portfolio_url"]:
-        portfolio_tlds = r"(?:dev|io|me|app|xyz|tech|page|site|design|studio|works|codes|vercel\.app|netlify\.app|github\.io|pages\.dev)"
-        for match in re.finditer(
-            rf'\b([a-zA-Z0-9](?:[a-zA-Z0-9-]{{0,61}}[a-zA-Z0-9])?\.{portfolio_tlds})(/[^\s]*)?\b',
-            text
-        ):
-            candidate = match.group(0).rstrip('.,;)')
-            start = match.start()
-            # Skip if this is actually part of an email address (preceded by @).
-            if start > 0 and text[start - 1] == "@":
-                continue
-            if "linkedin.com" in candidate.lower() or "github.com" in candidate.lower():
-                continue
-            result["portfolio_url"] = "https://" + candidate
+    lines_raw = text.split("\n")
+
+    def _is_heading(line: str) -> bool:
+        return line.strip().lower().rstrip(":") in section_headings
+
+    projects_start, projects_end = None, len(lines_raw)
+    for i, line in enumerate(lines_raw):
+        stripped = line.strip().lower().rstrip(":")
+        if stripped in ("projects", "personal projects", "project experience"):
+            projects_start = i
+        elif projects_start is not None and i > projects_start and _is_heading(line):
+            projects_end = i
             break
+
+    first_heading_idx = next((i for i, l in enumerate(lines_raw) if _is_heading(l)), len(lines_raw))
+
+    candidates = []  # (priority, url) -- lower priority number wins
+    for i, line in enumerate(lines_raw):
+        if projects_start is not None and projects_start <= i < projects_end:
+            continue  # inside "Projects": these are demo links, not the portfolio
+
+        found = [m.group(0) for m in re.finditer(r'https?://[^\s\n]+', line, re.IGNORECASE)]
+        for m in bare_domain_re.finditer(line):
+            if m.start() > 0 and line[m.start() - 1] == "@":
+                continue  # part of an email, not a bare domain
+            found.append(m.group(0))
+
+        for raw_url in found:
+            url = re.sub(r'[\)\.\,\;\>]+$', '', raw_url.strip())
+            lowered = url.lower()
+            if "linkedin.com" in lowered or "github.com" in lowered:
+                continue
+            full_url = url if url.startswith("http") else "https://" + url
+            has_keyword = bool(
+                portfolio_keyword_re.search(line)
+                or (i > 0 and portfolio_keyword_re.search(lines_raw[i - 1]))
+            )
+            if has_keyword:
+                candidates.append((0, full_url))
+            elif i <= first_heading_idx:
+                candidates.append((1, full_url))
+            # else: body text with no header/keyword signal -- too risky to trust
+
+    if candidates:
+        candidates.sort(key=lambda c: c[0])
+        result["portfolio_url"] = candidates[0][1]
 
     phone_match = re.search(
         r'(\+\d{1,2}[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b', text
