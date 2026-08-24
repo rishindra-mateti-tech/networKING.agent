@@ -417,6 +417,7 @@ class QueueOrchestrator:
                         connection.context_summary = bridge_data["context_summary"]
                         
                         # Save new platform metrics
+                        connection.current_company_years_experience = bridge_data.get("current_company_years_experience")
                         connection.networking_score = bridge_data["networking_score"]
                         connection.reply_probability = bridge_data["reply_probability"]
                         connection.hiring_probability_score = bridge_data["hiring_probability_score"]
@@ -492,6 +493,7 @@ class QueueOrchestrator:
                                     profile_url_block = ""
                                     if connection.profile_url:
                                         profile_url_block = f"🔗 <b>LinkedIn URL</b>: {html.escape(connection.profile_url)}\n"
+                                    email_block = f"📧 <b>Email</b>: {html.escape(connection.candidate_email) if connection.candidate_email else 'Not found'}\n"
                                     hiring_probability = html.escape(raw_hiring_probability)
                                     is_decision_maker = html.escape(raw_is_decision_maker)
                                     referral_potential = html.escape(raw_referral_potential)
@@ -514,6 +516,7 @@ class QueueOrchestrator:
                                             f"💼 <b>Role</b>: {safe_title} @ {safe_company}\n"
                                             f"🏢 <b>Classification</b>: {company_class}\n"
                                             f"{profile_url_block}"
+                                            f"{email_block}"
                                             f"🌟 <b>Networking Score</b>: {networking_score}/10\n"
                                             f"📈 <b>Reply Probability</b>: {reply_probability}%\n"
                                             f"💼 <b>Hiring Probability</b>: {hiring_probability}\n"
@@ -548,12 +551,14 @@ class QueueOrchestrator:
                                     profile_url_line = ""
                                     if connection.profile_url:
                                         profile_url_line = f"🔗 *LinkedIn URL*: {_slack_escape(connection.profile_url)}\n"
+                                    email_line = f"📧 *Email*: {_slack_escape(connection.candidate_email) if connection.candidate_email else 'Not found'}\n"
 
                                     slack_text = (
                                         f"✨ *Outreach Intelligence Ready for {_slack_escape(raw_name)}!*\n"
                                         f"💼 *Role*: {_slack_escape(raw_title)} @ {_slack_escape(raw_company)}\n"
                                         f"🏢 *Classification*: {_slack_escape(raw_company_class)}\n"
-                                        f"{profile_url_line}\n"
+                                        f"{profile_url_line}"
+                                        f"{email_line}\n"
                                         f"🌟 *Networking Score*: {networking_score}/10\n"
                                         f"📈 *Reply Probability*: {reply_probability}%\n"
                                         f"💼 *Hiring Probability*: {_slack_escape(raw_hiring_probability)}\n"

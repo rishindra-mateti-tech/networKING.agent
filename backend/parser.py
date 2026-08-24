@@ -619,8 +619,8 @@ def extract_resume_contact_info(resume_text: str) -> dict:
         url = re.sub(r'[\)\.\,\;\>]+$', '', github_match.group(0).strip())
         result["github_url"] = url if url.startswith("http") else "https://" + url
 
-    # Portfolio: first http(s) URL that isn't LinkedIn/GitHub and doesn't look
-    # like an email host. Genuinely best-effort, may be None.
+    # Portfolio: first http(s) URL that isn't LinkedIn/GitHub. Genuinely
+    # best-effort, may be None.
     for url_match in re.finditer(r'https?://[^\s\n]+', text, re.IGNORECASE):
         url = re.sub(r'[\)\.\,\;\>]+$', '', url_match.group(0).strip())
         lowered = url.lower()
@@ -628,6 +628,28 @@ def extract_resume_contact_info(resume_text: str) -> dict:
             continue
         result["portfolio_url"] = url
         break
+
+    # Resumes very often list a portfolio as a bare domain with no "http://"
+    # at all (e.g. "rishindra.dev", "myname.vercel.app"), which the scan
+    # above never matches. Fall back to a bare-domain scan restricted to TLDs
+    # that actually signal a personal site/portfolio, to avoid false-positive
+    # matches on ordinary prose (a generic .com/.org/.net bare word is too
+    # noisy to trust without a protocol).
+    if not result["portfolio_url"]:
+        portfolio_tlds = r"(?:dev|io|me|app|xyz|tech|page|site|design|studio|works|codes|vercel\.app|netlify\.app|github\.io|pages\.dev)"
+        for match in re.finditer(
+            rf'\b([a-zA-Z0-9](?:[a-zA-Z0-9-]{{0,61}}[a-zA-Z0-9])?\.{portfolio_tlds})(/[^\s]*)?\b',
+            text
+        ):
+            candidate = match.group(0).rstrip('.,;)')
+            start = match.start()
+            # Skip if this is actually part of an email address (preceded by @).
+            if start > 0 and text[start - 1] == "@":
+                continue
+            if "linkedin.com" in candidate.lower() or "github.com" in candidate.lower():
+                continue
+            result["portfolio_url"] = "https://" + candidate
+            break
 
     phone_match = re.search(
         r'(\+\d{1,2}[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b', text

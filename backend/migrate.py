@@ -46,6 +46,7 @@ _NEW_CONNECTION_COLUMNS = [
     ("candidate_email", "TEXT", "TEXT"),
     ("generated_email_subject", "TEXT", "TEXT"),
     ("generated_email_body", "TEXT", "TEXT"),
+    ("current_company_years_experience", "REAL", "DOUBLE PRECISION"),
 ]
 _NEW_INTERACTION_LOG_COLUMNS = [
     ("screenshot_path", "TEXT", "TEXT"),

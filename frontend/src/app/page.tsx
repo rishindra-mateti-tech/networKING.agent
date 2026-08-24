@@ -64,6 +64,7 @@ export default function Home() {
   const [connUploadLoading, setConnUploadLoading] = useState(false);
   const [customConnCount, setCustomConnCount] = useState<number | null>(null);
   const [customHiringStatus, setCustomHiringStatus] = useState<string>(""); // "" (auto), "ON" (yes), "OFF" (no)
+  const [showManualFields, setShowManualFields] = useState(false);
 
 
   // Form Inputs: TwinAgent Settings
@@ -1520,9 +1521,17 @@ export default function Home() {
                             {conn.best_angle}
                           </span>
                         )}
+                        {conn.current_company_years_experience != null && conn.current_company_years_experience > 0 && (
+                          <span
+                            title={`${conn.current_company_years_experience} years at ${conn.company || "current company"}`}
+                            className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded border bg-amber-500/10 text-amber-300 border-amber-500/25"
+                          >
+                            {conn.current_company_years_experience}y@co
+                          </span>
+                        )}
                         {conn.years_experience > 0 && (
                           <span
-                            title={`${conn.years_experience} years of experience`}
+                            title={`${conn.years_experience} years of total experience`}
                             className={`text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded border ${
                               conn.years_experience >= 10
                                 ? "bg-violet-500/10 text-violet-300 border-violet-500/25"
@@ -1531,7 +1540,7 @@ export default function Home() {
                                 : "bg-white/5 text-zinc-300 border-white/10"
                             }`}
                           >
-                            {conn.years_experience}y
+                            {conn.years_experience}y total
                           </span>
                         )}
                         {conn.networking_score && (
@@ -1645,7 +1654,8 @@ export default function Home() {
                       <th className="text-left py-2.5 px-3 font-semibold">PDF</th>
                       <th className="text-left py-2.5 px-3 font-semibold">Name</th>
                       <th className="text-left py-2.5 px-3 font-semibold">Company</th>
-                      <th className="text-left py-2.5 px-3 font-semibold">Exp</th>
+                      <th className="text-left py-2.5 px-3 font-semibold">Exp @ Co</th>
+                      <th className="text-left py-2.5 px-3 font-semibold">Exp Total</th>
                       <th className="text-left py-2.5 px-3 font-semibold">Replied</th>
                       <th className="text-left py-2.5 px-3 font-semibold">Email</th>
                       <th className="text-left py-2.5 px-3 font-semibold">Actions</th>
@@ -1689,6 +1699,9 @@ export default function Home() {
                               )}
                             </td>
                             <td className="py-2 px-3 text-zinc-400">{conn.company || "-"}</td>
+                            <td className="py-2 px-3 text-zinc-400 font-mono">
+                              {conn.current_company_years_experience ? `${conn.current_company_years_experience}y` : "-"}
+                            </td>
                             <td className="py-2 px-3 text-zinc-400 font-mono">
                               {conn.years_experience ? `${conn.years_experience}y` : "-"}
                             </td>
@@ -3268,7 +3281,11 @@ export default function Home() {
                             <span className="text-white font-medium">{data.seniority || "N/A"}</span>
                           </div>
                           <div className="flex justify-between border-b border-zinc-800 pb-1">
-                            <span className="text-[10px] text-zinc-500">Experience</span>
+                            <span className="text-[10px] text-zinc-500">Experience at {data.company || "current company"}</span>
+                            <span className="text-white font-medium">{data.current_company_years_experience ? `${data.current_company_years_experience} Yrs` : "N/A"}</span>
+                          </div>
+                          <div className="flex justify-between border-b border-zinc-800 pb-1">
+                            <span className="text-[10px] text-zinc-500">Total Experience</span>
                             <span className="text-white font-medium">{data.years_experience ? `${data.years_experience} Yrs` : "N/A"}</span>
                           </div>
                           <div className="flex justify-between border-b border-zinc-800 pb-1">
@@ -3758,10 +3775,10 @@ export default function Home() {
       {/* 4. ADD OUTREACH TARGET DIALOG MODAL */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative">
-            <h3 className="text-base font-bold text-white mb-4">Add Outreach Target Candidate</h3>
-            
-            <form onSubmit={handleAddConnection} className="space-y-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-lg w-full max-h-[90vh] flex flex-col shadow-2xl relative">
+            <h3 className="text-base font-bold text-white p-6 pb-4 shrink-0">Add Outreach Target Candidate</h3>
+
+            <form onSubmit={handleAddConnection} className="space-y-4 overflow-y-auto px-6 pb-6">
               
               {/* Profile PDF drag zone */}
               <div className="border border-dashed border-zinc-800 rounded-lg p-4 text-center bg-zinc-950/40 relative">
@@ -3919,54 +3936,65 @@ export default function Home() {
                 <span className="text-[9px] text-zinc-500 mt-1 block">Supports PNG, JPG, JPEG</span>
               </div>
 
-              <div className="text-center text-[10px] text-zinc-500 font-mono uppercase tracking-wider">Or Input Manually</div>
+              <div className="border border-zinc-800 rounded-lg overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowManualFields(v => !v)}
+                  className="w-full flex items-center justify-between px-3 py-2.5 text-[10px] text-zinc-400 font-semibold uppercase tracking-wider hover:text-white transition-colors cursor-pointer"
+                >
+                  <span>Or Input Manually</span>
+                  {showManualFields ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                </button>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">Full Name</label>
-                  <input 
-                    type="text" 
-                    value={newConnName}
-                    onChange={e => setNewConnName(e.target.value)}
-                    required={connPdfFiles.length === 0}
-                    disabled={connPdfFiles.length > 0}
-                    placeholder="e.g. John Doe"
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none disabled:opacity-50"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">Current Title</label>
-                  <input 
-                    type="text" 
-                    value={newConnTitle}
-                    onChange={e => setNewConnTitle(e.target.value)}
-                    disabled={connPdfFiles.length > 0}
-                    placeholder="e.g. Staff Engineer"
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none disabled:opacity-50"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">Company</label>
-                  <input 
-                    type="text" 
-                    value={newConnCompany}
-                    onChange={e => setNewConnCompany(e.target.value)}
-                    disabled={connPdfFiles.length > 0}
-                    placeholder="e.g. Stripe"
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none disabled:opacity-50"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">Location</label>
-                  <input 
-                    type="text" 
-                    value={newConnLocation}
-                    onChange={e => setNewConnLocation(e.target.value)}
-                    disabled={connPdfFiles.length > 0}
-                    placeholder="e.g. San Francisco, CA"
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none disabled:opacity-50"
-                  />
-                </div>
+                {showManualFields && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-3 pt-1 border-t border-zinc-800">
+                    <div>
+                      <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">Full Name</label>
+                      <input
+                        type="text"
+                        value={newConnName}
+                        onChange={e => setNewConnName(e.target.value)}
+                        required={connPdfFiles.length === 0}
+                        disabled={connPdfFiles.length > 0}
+                        placeholder="e.g. John Doe"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none disabled:opacity-50"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">Current Title</label>
+                      <input
+                        type="text"
+                        value={newConnTitle}
+                        onChange={e => setNewConnTitle(e.target.value)}
+                        disabled={connPdfFiles.length > 0}
+                        placeholder="e.g. Staff Engineer"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none disabled:opacity-50"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">Company</label>
+                      <input
+                        type="text"
+                        value={newConnCompany}
+                        onChange={e => setNewConnCompany(e.target.value)}
+                        disabled={connPdfFiles.length > 0}
+                        placeholder="e.g. Stripe"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none disabled:opacity-50"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">Location</label>
+                      <input
+                        type="text"
+                        value={newConnLocation}
+                        onChange={e => setNewConnLocation(e.target.value)}
+                        disabled={connPdfFiles.length > 0}
+                        placeholder="e.g. San Francisco, CA"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none disabled:opacity-50"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>

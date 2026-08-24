@@ -52,6 +52,7 @@ class ConnectionOut(BaseModel):
     location: Optional[str] = None
     connection_count: int
     years_experience: float
+    current_company_years_experience: Optional[float] = None
     profile_text: Optional[str] = None
     posts_text: Optional[str] = None
     status: str

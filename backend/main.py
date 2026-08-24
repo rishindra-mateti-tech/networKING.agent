@@ -995,6 +995,7 @@ def get_analytics_overview(current_user: models.User = Depends(get_current_user)
             "status": c.status,
             "seniority": seniority,
             "years_experience": c.years_experience,
+            "current_company_years_experience": c.current_company_years_experience,
             "connection_count": c.connection_count,
             "networking_score": c.networking_score,
             "reply_probability": c.reply_probability,
@@ -1073,7 +1074,9 @@ def ask_analytics(
             pass
         rows.append(
             f"- {c.name} | {c.current_title or 'unknown title'} at {c.company or 'unknown company'} | "
-            f"seniority={seniority} | experience={c.years_experience}yrs | connections={c.connection_count} | "
+            f"seniority={seniority} | total_experience={c.years_experience}yrs | "
+            f"experience_at_current_company={c.current_company_years_experience if c.current_company_years_experience is not None else 'unknown'}yrs | "
+            f"connections={c.connection_count} | "
             f"status={c.status} | networking_score={c.networking_score} | reply_probability={c.reply_probability} | "
             f"sent={c.sent_at.isoformat() if c.sent_at else 'never'} | "
             f"replied={c.replied_at.isoformat() if c.replied_at else 'no'} | "

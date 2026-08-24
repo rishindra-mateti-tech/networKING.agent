@@ -107,7 +107,15 @@ def run_profile_intelligence_agent(api_key: str, name: str, profile_text: str, p
     - "company": Current company name.
     - "follower_count": Candidate's follower count if visible (e.g. "1,200", "50k", or "Under 500"). If not found, output "Under 500".
     - "connection_count": Candidate's connections count (integer or "500+").
-    - "years_experience": Approximate total years of professional experience (float/number).
+    - "years_experience": Approximate TOTAL years of professional experience across their entire career,
+      every employer combined (float/number).
+    - "current_company_years_experience": Approximate years spent at their CURRENT company specifically
+      (float/number), which is very often much smaller than years_experience. A senior director with 16
+      years of total experience who joined their current company 1 year ago should report
+      "years_experience": 16 and "current_company_years_experience": 1. These two numbers describe
+      different things and are not interchangeable: total experience is what the person can credibly
+      claim overall, current-company tenure is what determines whether they're established enough there
+      to give a referral or speak for the team's current hiring needs.
     - "education": Summary of their education (e.g. degrees, universities).
     - "mutual_interests": Any mutual interests, topics, or domains.
     - "technologies": Core programming languages, systems, stacks, or tools they work with.
@@ -144,6 +152,7 @@ def run_profile_intelligence_agent(api_key: str, name: str, profile_text: str, p
             "follower_count": data.get("follower_count", "Under 500"),
             "connection_count": data.get("connection_count", "0"),
             "years_experience": float(data.get("years_experience") or 0.0),
+            "current_company_years_experience": float(data.get("current_company_years_experience") or 0.0),
             "education": clean_unicode_text(data.get("education", "")),
             "mutual_interests": clean_unicode_text(data.get("mutual_interests", "")),
             "technologies": clean_unicode_text(data.get("technologies", "")),
@@ -166,6 +175,7 @@ def run_profile_intelligence_agent(api_key: str, name: str, profile_text: str, p
             "follower_count": "Under 500",
             "connection_count": "0",
             "years_experience": 0.0,
+            "current_company_years_experience": 0.0,
             "education": "",
             "mutual_interests": "",
             "technologies": "",
@@ -569,19 +579,30 @@ def run_message_writing_agent(
     - CRITICAL NEGATIVE CONSTRAINT: Never use an em dash (—) or en dash (–). Ban all AI clichés: "Hope this finds you well", "Hope you are doing well", "I was impressed by your profile", "Quick chat", "15-minute coffee chat", "delve", "leverage", "synergy", "unlock", "game-changer", "passionate about", "reaching out because", "pick your brain", "thought leader", "excited to connect", "would love to connect", "in today's fast-paced world", "navigate the landscape of", "incredible work", "truly inspiring", "Looking forward to hearing from you!", "Thanks in advance!".
     - COFFEE CHAT CONSTRAINT: If the candidate's seniority is Founder, CEO, VP, or Director, DO NOT request a coffee chat or a meeting in the Coffee Chat draft. Instead, write it as a brief, respectful request to connect/follow their work or ask a quick strategic question.
     
-    FEW-SHOT TONE REFERENCE TEMPLATES:
+    FEW-SHOT TONE REFERENCE TEMPLATES (STRUCTURE AND TONE ONLY, NOT FACTS):
+    These four examples exist to show sentence rhythm, warmth, and the "no pressure" pattern. They are
+    NOT a source of truth about who the sender is. The bracketed [current status] in each one stands in
+    for whatever the USER DETAILS (RISHINDRA) section above actually says right now, current job, visa
+    status, school status, or anything else, and it changes over time as that profile is updated. If
+    USER DETAILS says the sender has graduated, is on OPT, or has a different job than what these
+    examples imply, use THAT, never the literal wording below.
     * Referral / Opportunity Inquiry:
-      "Hi {candidate_name}, I'm Rishindra, currently an AI Engineer Intern at ZUZU.AI, where I build RAG pipelines and FastAPI backends. I saw that your team at {candidate_company} focuses on shipping fast, which caught my attention. With my background in backend engineering and building AI tools like CodeStory, I'm curious if your team is currently looking for additional engineering support. I know your time is valuable, so there is absolutely no pressure, but I would be grateful to connect and learn more about what you're building."
-    
+      "Hi {candidate_name}, I'm Rishindra, [current status from USER DETAILS, e.g. an AI Engineer Intern at ZUZU.AI], where I build RAG pipelines and FastAPI backends. I saw that your team at {candidate_company} focuses on shipping fast, which caught my attention. With my background in backend engineering and building AI tools like CodeStory, I'm curious if your team is currently looking for additional engineering support. I know your time is valuable, so there is absolutely no pressure, but I would be grateful to connect and learn more about what you're building."
+
     * Low-Pressure Career Advice Request (Connection Accepted Follow-up):
-      "Hi {candidate_name}, thanks for connecting. I'm currently finishing my Master's in CS at Wright State and working as an AI Engineer Intern at ZUZU.AI. I spent some time going through your profile, and I was genuinely impressed by your journey at {candidate_company}. I'm trying to learn from developers who have successfully navigated this path. If you ever have a few spare minutes, I'd be incredibly grateful for any advice or insights you could share on what skills are critical for your team. I know your time is valuable, so there is absolutely no pressure at all."
-    
+      "Hi {candidate_name}, thanks for connecting. [current status from USER DETAILS, one sentence]. I spent some time going through your profile, and I was genuinely impressed by your journey at {candidate_company}. I'm trying to learn from developers who have successfully navigated this path. If you ever have a few spare minutes, I'd be incredibly grateful for any advice or insights you could share on what skills are critical for your team. I know your time is valuable, so there is absolutely no pressure at all."
+
     * Alumni / Common Ground Builder:
-      "Fellow Wright State Builder 👋 Hi {candidate_name}, fellow Wright State alum here. I came across your profile while learning about {candidate_company} and really enjoyed seeing how you approached building resilient engineering teams. I'm currently pursuing my MS in CS at WSU and working as an AI Engineer Intern at ZUZU.AI. If you ever have a spare moment to share your perspective on how you made that transition, I would truly value your guidance. No pressure at all."
-    
+      "Fellow Wright State Builder 👋 Hi {candidate_name}, fellow Wright State alum here. I came across your profile while learning about {candidate_company} and really enjoyed seeing how you approached building resilient engineering teams. [current status from USER DETAILS, one sentence]. If you ever have a spare moment to share your perspective on how you made that transition, I would truly value your guidance. No pressure at all."
+
     * Recruiter / TA Specialist Advice Request:
-      "Hi {candidate_name}, Thank you for connecting. I'm a CS Master's student at Wright State University working on AI/ML projects, including an IEEE-published paper and the Google × Kaggle AI Agents Intensive. I know you support technical recruiting at {candidate_company}, so I wanted to ask very humbly, what would you recommend students like me focus on to become stronger candidates in the future? I know your time is valuable, so even a single line of advice would be something I'd be incredibly grateful for."
-    
+      "Hi {candidate_name}, Thank you for connecting. [current status from USER DETAILS, one sentence, e.g. work authorization or current role, whichever is more relevant to a recruiter]. I know you support technical recruiting at {candidate_company}, so I wanted to ask very humbly, what would you recommend I focus on to become a stronger candidate? I know your time is valuable, so even a single line of advice would be something I'd be incredibly grateful for."
+
+    Before writing, check the USER DETAILS section above for the sender's actual current status (job,
+    school, work authorization) and use that exact reality in every draft. Never say "currently
+    pursuing" or "student" if USER DETAILS indicates they have already graduated or hold a different
+    status now.
+
     Please generate EXACTLY 5 message variants:
     1. Referral Draft (Focuses on job opportunity referral or learning about open opportunities in their team/company)
     2. Coffee Chat Draft (A short chat/networking request. For high-seniority targets, adjust this to be a low-pressure question/connection request instead of a meeting ask)
@@ -706,6 +727,7 @@ def analyze_candidate_bridge(api_key: str, twin_profile: str, candidate_name: st
         "context_summary": context_summary,
         
         # New platform metrics and direct attributes
+        "current_company_years_experience": profile_intel.get("current_company_years_experience", 0.0),
         "networking_score": strategy_intel.get("networking_score", 5.0),
         "reply_probability": strategy_intel.get("reply_probability", 50.0),
         "hiring_probability_score": strategy_intel.get("hiring_probability_score", "unknown"),
@@ -900,12 +922,15 @@ def generate_outreach_email(
         "- If the research context is thin, write a shorter, plainer email. A short honest email beats a long "
         "email padded with invented familiarity.\n\n"
 
-        "CALIBRATION, showing the difference the opening line makes.\n\n"
+        "CALIBRATION, showing the difference the opening line makes. The sender's status in these two "
+        "examples ('a CS Master's student') is illustrative only, it is NOT what to write. Always pull the "
+        "sender's actual current status from the WHO IS WRITING THIS EMAIL section below, not from these "
+        "examples, since that profile changes over time (e.g. they may have since graduated or changed roles).\n\n"
 
         "WEAK, because it leads with the sender and could be sent to anyone:\n"
         "  Subject: building developer tools at console\n"
-        "  'Hi Adithya, I'm Rishindra, a CS Master's student at Wright State and a software engineer "
-        "building full-stack AI systems at ZUZU.AI. I noticed your work spanning native iOS and web "
+        "  'Hi Adithya, I'm Rishindra, [whatever the sender's current status actually is] and a software "
+        "engineer building full-stack AI systems at ZUZU.AI. I noticed your work spanning native iOS and web "
         "frameworks like React and Vue while building developer tools at Console...'\n"
         "  Why it fails: the first fourteen words are about the sender. The observation is a list of "
         "technologies scraped from a profile, not a thought. Nothing here is unanswerable, so nothing "
@@ -917,8 +942,8 @@ def generate_outreach_email(
         "  'Hi Adithya, when you're shipping a developer tool across native iOS and web at the same time, "
         "where do you draw the line on shared logic? I keep landing on duplicating it and regretting it "
         "about a month later.\n\n"
-        "  I'm a CS Master's student at Wright State, and I've been building a repo-analysis tool that ran "
-        "into the same wall from the backend side.\n\n"
+        "  [One line on the sender's actual current status, pulled from the profile below], and I've been "
+        "building a repo-analysis tool that ran into the same wall from the backend side.\n\n"
         "  If you have a minute, I'd genuinely like to know how Console handles it. No worries if not.'\n"
         "  Why it works: the first sentence is a real technical question aimed at their actual daily "
         "problem. It admits something ('regretting it') which reads human. The credential is one line and "
