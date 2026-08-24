@@ -165,6 +165,11 @@ def _extract_company_from_experience(lines: list) -> str:
                 continue
             if c.startswith("("):
                 continue
+            # A location line ("United States", "Greater Seattle Area") can
+            # end up first when an export's layout omits or repositions the
+            # company line -- never return one of these as the employer.
+            if _looks_like_location(c):
+                continue
             # NOTE: deliberately not skipping every line that opens with a
             # digit. Real employers do ("10G Caterpillar - Aerotek", "3M",
             # "7-Eleven"), and a blanket digit rule silently demoted those to
@@ -548,7 +553,17 @@ def extract_linkedin_profile_metadata(pdf_text: str) -> dict:
     # roles) would each add their own years on top of each other. Merging
     # intervals first, then summing only the merged (non-overlapping) spans,
     # gives a realistic total instead of an inflated one.
-    year_ranges = re.findall(r"(\b20\d{2}\b)\s*[-\u2013\u2014]\s*(\b20\d{2}\b|Present)", pdf_text, re.IGNORECASE)
+    #
+    # LinkedIn's actual date format is "Month YYYY - Month YYYY" (e.g. "April
+    # 2021 - June 2025"), not bare "YYYY - YYYY". A pattern that only allows
+    # whitespace between the dash and the second year misses every completed
+    # role outright, since a month name sits between them, undercounting
+    # total experience down to just whatever "X - Present" range happens to
+    # exist (or to nothing at all, if even that range spans under a year).
+    year_ranges = re.findall(
+        r"(\b20\d{2}\b)\s*[-\u2013\u2014]\s*(?:[A-Za-z]+\.?\s+)?(\b20\d{2}\b|Present)",
+        pdf_text, re.IGNORECASE
+    )
     current_year = datetime.date.today().year
 
     intervals = []
