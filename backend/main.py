@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import html
 import httpx
@@ -27,6 +28,7 @@ from generator import (
     answer_analytics_question,
     generate_twin_understanding,
     chat_about_twin_profile,
+    validate_api_key,
 )
 from twin_agent import compile_twin_agent_profile, get_sender_name
 
@@ -433,6 +435,21 @@ async def toggle_api_key(key_id: int, current_user: models.User = Depends(get_cu
     
     await QueueOrchestrator().sync_user_workers(current_user.id)
     return key
+
+@app.post("/api/keys/{key_id}/test")
+async def test_api_key(key_id: int, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Makes one lightweight Gemini call with this stored key to confirm it's actually working right now."""
+    key = db.query(models.ApiKey).filter(
+        models.ApiKey.id == key_id,
+        models.ApiKey.user_id == current_user.id
+    ).first()
+    if not key:
+        raise HTTPException(status_code=404, detail="API Key not found")
+
+    check = await asyncio.to_thread(validate_api_key, key.key_value)
+    if check["valid"]:
+        return {"message": f"'{key.label or 'This key'}' is working."}
+    raise HTTPException(status_code=400, detail=f"'{key.label or 'This key'}' failed: {check['error']}")
 
 @app.delete("/api/keys/{key_id}")
 async def delete_api_key(key_id: int, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):

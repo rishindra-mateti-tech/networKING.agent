@@ -123,6 +123,12 @@ export default function Home() {
   const [newKeyRole, setNewKeyRole] = useState<"primary" | "standby">("primary");
   const [newKeyLabel, setNewKeyLabel] = useState("");
 
+  // Test API Key (mirrors the Test Telegram/Test Slack pattern)
+  const [testKeyId, setTestKeyId] = useState<number | "">("");
+  const [testKeyLoading, setTestKeyLoading] = useState(false);
+  const [testKeyMessage, setTestKeyMessage] = useState("");
+  const [testKeyError, setTestKeyError] = useState("");
+
   // Form Inputs: Telegram & Pacing Settings
   const [telegramToken, setTelegramToken] = useState("");
   const [telegramChatId, setTelegramChatId] = useState("");
@@ -523,7 +529,7 @@ export default function Home() {
   const handleAddApiKey = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newKeyVal) return;
-    
+
     try {
       const res = await fetchWithAuth("/api/keys", {
         method: "POST",
@@ -541,6 +547,26 @@ export default function Home() {
       }
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const handleTestApiKey = async () => {
+    if (!testKeyId) return;
+    setTestKeyLoading(true);
+    setTestKeyMessage("");
+    setTestKeyError("");
+    try {
+      const res = await fetchWithAuth(`/api/keys/${testKeyId}/test`, { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setTestKeyMessage(data.message || "Key is working.");
+      } else {
+        setTestKeyError(data.detail || "Key test failed.");
+      }
+    } catch (err: any) {
+      setTestKeyError(err.message || "Network error.");
+    } finally {
+      setTestKeyLoading(false);
     }
   };
 
@@ -2438,7 +2464,7 @@ export default function Home() {
                       className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-violet-500"
                     />
                   </div>
-                  <button 
+                  <button
                     type="submit"
                     className="w-full bg-zinc-900 border border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-white hover:border-zinc-700 text-xs font-semibold py-2.5 rounded transition-colors cursor-pointer shadow-lg"
                   >
@@ -2446,6 +2472,48 @@ export default function Home() {
                   </button>
 
                 </form>
+
+                <hr className="border-zinc-800 my-5" />
+
+                {/* Test API Key */}
+                <h3 className="text-sm font-semibold text-white mb-2">Test API Key</h3>
+                <p className="text-xs text-zinc-400 mb-4">
+                  Makes one real Gemini call with the selected key to confirm it's actually working right now.
+                </p>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">Key</label>
+                    <select
+                      value={testKeyId}
+                      onChange={e => setTestKeyId(e.target.value ? Number(e.target.value) : "")}
+                      disabled={keys.length === 0}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-violet-500 cursor-pointer disabled:opacity-50"
+                    >
+                      <option value="">{keys.length === 0 ? "No keys registered yet" : "Select a key..."}</option>
+                      {keys.map(k => (
+                        <option key={k.id} value={k.id}>{k.label || `Gemini Key #${k.id}`}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleTestApiKey}
+                    disabled={!testKeyId || testKeyLoading}
+                    className="w-full bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 hover:text-white py-2.5 rounded border border-zinc-700 hover:border-zinc-600 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {testKeyLoading ? "Testing..." : "Test API Key"}
+                  </button>
+                  {testKeyMessage && (
+                    <div className="text-xs text-emerald-400 bg-emerald-950/20 border border-emerald-900/30 rounded-lg p-3">
+                      {testKeyMessage}
+                    </div>
+                  )}
+                  {testKeyError && (
+                    <div className="text-xs text-rose-400 bg-rose-950/20 border border-rose-900/30 rounded-lg p-3">
+                      {testKeyError}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Keys List */}

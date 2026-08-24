@@ -79,6 +79,23 @@ def _call_gemini(api_key: str, system_instruction: str, prompt_or_contents, json
     raise RuntimeError("Failed to obtain response from Gemini API.")
 
 
+def validate_api_key(api_key: str) -> dict:
+    """
+    Makes one minimal Gemini call to confirm a newly added API key actually
+    works, so a dead key or a typo gets caught immediately when it's added
+    instead of silently failing the first time a worker tries to use it for
+    real processing. This can only confirm the key is valid and currently
+    able to make a call -- Gemini's API does not expose whether a key is on
+    the free tier vs. a paid tier, or its exact rate limits, so this cannot
+    report that.
+    """
+    try:
+        _call_gemini(api_key, "Reply with exactly one word.", "Say hello.")
+        return {"valid": True, "error": None}
+    except Exception as e:
+        return {"valid": False, "error": str(e)}
+
+
 def run_profile_intelligence_agent(api_key: str, name: str, profile_text: str, posts_text: str, screenshot_path: str = None) -> dict:
     """
     Agent 1: Profile Intelligence Agent
