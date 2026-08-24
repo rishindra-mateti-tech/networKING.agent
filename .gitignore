@@ -28,3 +28,6 @@ frontend/npm-debug.log*
 Thumbs.db
 .vscode/
 .idea/
+
+# Local AI-assistant tooling config, not part of the app
+.claude/
