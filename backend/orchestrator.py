@@ -444,135 +444,143 @@ class QueueOrchestrator:
                         success = True
                         print(f"[WORKER] {worker_name} successfully finished generation for {connection.name}.")
                         
-                        # Build shared notification content (used by both Telegram and Slack)
-                        if (telegram_token and telegram_chat_id) or slack_webhook_url:
-                            import json as j
+                        # Build shared notification content (used by both Telegram and Slack).
+                        # Wrapped in its own try/except so a bug here (or a transient
+                        # Telegram/Slack error) can never fall through to the generation
+                        # failure handler below, which would wrongly cooldown a key that
+                        # actually succeeded and already committed connection.status = "completed".
+                        try:
+                            if (telegram_token and telegram_chat_id) or slack_webhook_url:
+                                import json as j
 
-                            try:
-                                company_intel = j.loads(bridge_data.get("company_intelligence") or "{}")
-                            except Exception:
-                                company_intel = {}
+                                try:
+                                    company_intel = j.loads(bridge_data.get("company_intelligence") or "{}")
+                                except Exception:
+                                    company_intel = {}
 
-                            raw_name = connection.name or "Candidate"
-                            raw_title = connection.current_title or "Software Professional"
-                            raw_company = connection.company or "Company"
-                            raw_company_class = company_intel.get("company_type") or "Startup"
+                                raw_name = connection.name or "Candidate"
+                                raw_title = connection.current_title or "Software Professional"
+                                raw_company = connection.company or "Company"
+                                raw_company_class = company_intel.get("company_type") or "Startup"
 
-                            networking_score = f"{connection.networking_score or 5.0}"
-                            reply_probability = f"{int(connection.reply_probability or 50)}"
+                                networking_score = f"{connection.networking_score or 5.0}"
+                                reply_probability = f"{int(connection.reply_probability or 50)}"
 
-                            hiring_val = connection.hiring_badge_status or company_intel.get("hiring_status") or connection.hiring_probability_score or "unknown"
-                            raw_hiring_probability = str(hiring_val).capitalize()
+                                hiring_val = connection.hiring_badge_status or company_intel.get("hiring_status") or connection.hiring_probability_score or "unknown"
+                                raw_hiring_probability = str(hiring_val).capitalize()
 
-                            raw_is_decision_maker = (connection.is_decision_maker or "no").capitalize()
-                            raw_referral_potential = (connection.referral_potential or "medium").capitalize()
-                            raw_networking_difficulty = (connection.networking_difficulty or "medium").replace('_', ' ').capitalize()
+                                raw_is_decision_maker = (connection.is_decision_maker or "no").capitalize()
+                                raw_referral_potential = (connection.referral_potential or "medium").capitalize()
+                                raw_networking_difficulty = (connection.networking_difficulty or "medium").replace('_', ' ').capitalize()
 
-                            raw_conversation_starter = connection.conversation_starter or "None"
-                            raw_avoid_points = connection.avoid_points or "None"
-                            raw_best_message_type = connection.best_message_type or "Technical curiosity"
+                                raw_conversation_starter = connection.conversation_starter or "None"
+                                raw_avoid_points = connection.avoid_points or "None"
+                                raw_best_message_type = connection.best_message_type or "Technical curiosity"
 
-                            raw_referral = connection.generated_outreach_referral or ""
-                            raw_coffee = connection.generated_outreach_coffee or ""
-                            raw_technical = connection.generated_outreach_technical or ""
-                            raw_relationship = connection.generated_outreach_relationship or ""
-                            raw_featured = connection.generated_outreach_featured or ""
+                                raw_referral = connection.generated_outreach_referral or ""
+                                raw_coffee = connection.generated_outreach_coffee or ""
+                                raw_technical = connection.generated_outreach_technical or ""
+                                raw_relationship = connection.generated_outreach_relationship or ""
+                                raw_featured = connection.generated_outreach_featured or ""
 
-                            # --- Telegram (HTML parse_mode) ---
-                            if telegram_token and telegram_chat_id:
-                                safe_name = html.escape(raw_name)
-                                safe_title = html.escape(raw_title)
-                                safe_company = html.escape(raw_company)
-                                company_class = html.escape(raw_company_class)
-                                profile_url_block = ""
-                                if connection.profile_url:
-                                    profile_url_block = f"🔗 <b>LinkedIn URL</b>: {html.escape(connection.profile_url)}\n"
-                                hiring_probability = html.escape(raw_hiring_probability)
-                                is_decision_maker = html.escape(raw_is_decision_maker)
-                                referral_potential = html.escape(raw_referral_potential)
-                                networking_difficulty = html.escape(raw_networking_difficulty)
-                                conversation_starter = html.escape(raw_conversation_starter)
-                                avoid_points = html.escape(raw_avoid_points)
-                                best_message_type = html.escape(raw_best_message_type)
-                                safe_referral = html.escape(raw_referral)
-                                safe_coffee = html.escape(raw_coffee)
-                                safe_technical = html.escape(raw_technical)
-                                safe_relationship = html.escape(raw_relationship)
-                                safe_featured = html.escape(raw_featured)
+                                # --- Telegram (HTML parse_mode) ---
+                                if telegram_token and telegram_chat_id:
+                                    safe_name = html.escape(raw_name)
+                                    safe_title = html.escape(raw_title)
+                                    safe_company = html.escape(raw_company)
+                                    company_class = html.escape(raw_company_class)
+                                    profile_url_block = ""
+                                    if connection.profile_url:
+                                        profile_url_block = f"🔗 <b>LinkedIn URL</b>: {html.escape(connection.profile_url)}\n"
+                                    hiring_probability = html.escape(raw_hiring_probability)
+                                    is_decision_maker = html.escape(raw_is_decision_maker)
+                                    referral_potential = html.escape(raw_referral_potential)
+                                    networking_difficulty = html.escape(raw_networking_difficulty)
+                                    conversation_starter = html.escape(raw_conversation_starter)
+                                    avoid_points = html.escape(raw_avoid_points)
+                                    best_message_type = html.escape(raw_best_message_type)
+                                    safe_referral = html.escape(raw_referral)
+                                    safe_coffee = html.escape(raw_coffee)
+                                    safe_technical = html.escape(raw_technical)
+                                    safe_relationship = html.escape(raw_relationship)
+                                    safe_featured = html.escape(raw_featured)
 
-                                # Sent as discrete blocks rather than one string so
-                                # the splitter can never cut inside a <code> draft
-                                # and leave an unclosed tag.
-                                telegram_blocks = [
-                                    (
-                                        f"✨ <b>Outreach Intelligence Ready for {safe_name}!</b>\n"
-                                        f"💼 <b>Role</b>: {safe_title} @ {safe_company}\n"
-                                        f"🏢 <b>Classification</b>: {company_class}\n"
-                                        f"{profile_url_block}"
-                                        f"🌟 <b>Networking Score</b>: {networking_score}/10\n"
-                                        f"📈 <b>Reply Probability</b>: {reply_probability}%\n"
-                                        f"💼 <b>Hiring Probability</b>: {hiring_probability}\n"
-                                        f"🔑 <b>Decision Maker</b>: {is_decision_maker}\n"
-                                        f"🤝 <b>Referral Potential</b>: {referral_potential}\n"
-                                        f"🧗 <b>Networking Difficulty</b>: {networking_difficulty}\n\n"
-                                        f"💡 <b>Conversation Starter</b>: {conversation_starter}\n"
-                                        f"⚠️ <b>Avoid</b>: {avoid_points}\n"
-                                        f"🎯 <b>Best Message Type</b>: {best_message_type}"
-                                    ),
-                                ]
-                                for label, body in [
-                                    ("REFERRAL DRAFT", safe_referral),
-                                    ("COFFEE CHAT DRAFT", safe_coffee),
-                                    ("TECHNICAL DRAFT", safe_technical),
-                                    ("RELATIONSHIP BUILDING DRAFT", safe_relationship),
-                                    ("FEATURED OUTREACH DRAFT", safe_featured),
-                                ]:
-                                    if body:
-                                        telegram_blocks.append(f"📝 <b>{label}</b>\n<code>{body}</code>")
-                                telegram_blocks.append("<i>Review, select &amp; copy from your networKING dashboard.</i>")
+                                    # Sent as discrete blocks rather than one string so
+                                    # the splitter can never cut inside a <code> draft
+                                    # and leave an unclosed tag.
+                                    telegram_blocks = [
+                                        (
+                                            f"✨ <b>Outreach Intelligence Ready for {safe_name}!</b>\n"
+                                            f"💼 <b>Role</b>: {safe_title} @ {safe_company}\n"
+                                            f"🏢 <b>Classification</b>: {company_class}\n"
+                                            f"{profile_url_block}"
+                                            f"🌟 <b>Networking Score</b>: {networking_score}/10\n"
+                                            f"📈 <b>Reply Probability</b>: {reply_probability}%\n"
+                                            f"💼 <b>Hiring Probability</b>: {hiring_probability}\n"
+                                            f"🔑 <b>Decision Maker</b>: {is_decision_maker}\n"
+                                            f"🤝 <b>Referral Potential</b>: {referral_potential}\n"
+                                            f"🧗 <b>Networking Difficulty</b>: {networking_difficulty}\n\n"
+                                            f"💡 <b>Conversation Starter</b>: {conversation_starter}\n"
+                                            f"⚠️ <b>Avoid</b>: {avoid_points}\n"
+                                            f"🎯 <b>Best Message Type</b>: {best_message_type}"
+                                        ),
+                                    ]
+                                    for label, body in [
+                                        ("REFERRAL DRAFT", safe_referral),
+                                        ("COFFEE CHAT DRAFT", safe_coffee),
+                                        ("TECHNICAL DRAFT", safe_technical),
+                                        ("RELATIONSHIP BUILDING DRAFT", safe_relationship),
+                                        ("FEATURED OUTREACH DRAFT", safe_featured),
+                                    ]:
+                                        if body:
+                                            telegram_blocks.append(f"📝 <b>{label}</b>\n<code>{body}</code>")
+                                    telegram_blocks.append("<i>Review, select &amp; copy from your networKING dashboard.</i>")
 
-                                await self._send_telegram_alert(
-                                    telegram_token, telegram_chat_id, blocks=telegram_blocks
-                                )
+                                    await self._send_telegram_alert(
+                                        telegram_token, telegram_chat_id, blocks=telegram_blocks
+                                    )
 
-                            # --- Slack (mrkdwn) ---
-                            if slack_webhook_url:
-                                def _slack_escape(s: str) -> str:
-                                    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                                # --- Slack (mrkdwn) ---
+                                if slack_webhook_url:
+                                    def _slack_escape(s: str) -> str:
+                                        return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-                                profile_url_line = ""
-                                if connection.profile_url:
-                                    profile_url_line = f"🔗 *LinkedIn URL*: {_slack_escape(connection.profile_url)}\n"
+                                    profile_url_line = ""
+                                    if connection.profile_url:
+                                        profile_url_line = f"🔗 *LinkedIn URL*: {_slack_escape(connection.profile_url)}\n"
 
-                                slack_text = (
-                                    f"✨ *Outreach Intelligence Ready for {_slack_escape(raw_name)}!*\n"
-                                    f"💼 *Role*: {_slack_escape(raw_title)} @ {_slack_escape(raw_company)}\n"
-                                    f"🏢 *Classification*: {_slack_escape(raw_company_class)}\n"
-                                    f"{profile_url_line}\n"
-                                    f"🌟 *Networking Score*: {networking_score}/10\n"
-                                    f"📈 *Reply Probability*: {reply_probability}%\n"
-                                    f"💼 *Hiring Probability*: {_slack_escape(raw_hiring_probability)}\n"
-                                    f"🔑 *Decision Maker*: {_slack_escape(raw_is_decision_maker)}\n"
-                                    f"🤝 *Referral Potential*: {_slack_escape(raw_referral_potential)}\n"
-                                    f"🧗 *Networking Difficulty*: {_slack_escape(raw_networking_difficulty)}\n\n"
-                                    f"💡 *Conversation Starter*: {_slack_escape(raw_conversation_starter)}\n"
-                                    f"⚠️ *Avoid*: {_slack_escape(raw_avoid_points)}\n"
-                                    f"🎯 *Best Message Type*: {_slack_escape(raw_best_message_type)}\n\n"
-                                    f"----------------------------\n"
-                                    f"📝 *REFERRAL DRAFT*\n```{_slack_escape(raw_referral)}```\n"
-                                    f"----------------------------\n"
-                                    f"📝 *COFFEE CHAT DRAFT*\n```{_slack_escape(raw_coffee)}```\n"
-                                    f"----------------------------\n"
-                                    f"📝 *TECHNICAL DRAFT*\n```{_slack_escape(raw_technical)}```\n"
-                                    f"----------------------------\n"
-                                    f"📝 *RELATIONSHIP BUILDING DRAFT*\n```{_slack_escape(raw_relationship)}```\n"
-                                    f"----------------------------\n"
-                                    f"📝 *FEATURED OUTREACH DRAFT (No Limit)*\n```{_slack_escape(raw_featured)}```\n"
-                                    f"----------------------------\n"
-                                    f"_Review, select & copy from your networKING dashboard._"
-                                )
-                                await self._send_slack_alert(slack_webhook_url, slack_text)
-
+                                    slack_text = (
+                                        f"✨ *Outreach Intelligence Ready for {_slack_escape(raw_name)}!*\n"
+                                        f"💼 *Role*: {_slack_escape(raw_title)} @ {_slack_escape(raw_company)}\n"
+                                        f"🏢 *Classification*: {_slack_escape(raw_company_class)}\n"
+                                        f"{profile_url_line}\n"
+                                        f"🌟 *Networking Score*: {networking_score}/10\n"
+                                        f"📈 *Reply Probability*: {reply_probability}%\n"
+                                        f"💼 *Hiring Probability*: {_slack_escape(raw_hiring_probability)}\n"
+                                        f"🔑 *Decision Maker*: {_slack_escape(raw_is_decision_maker)}\n"
+                                        f"🤝 *Referral Potential*: {_slack_escape(raw_referral_potential)}\n"
+                                        f"🧗 *Networking Difficulty*: {_slack_escape(raw_networking_difficulty)}\n\n"
+                                        f"💡 *Conversation Starter*: {_slack_escape(raw_conversation_starter)}\n"
+                                        f"⚠️ *Avoid*: {_slack_escape(raw_avoid_points)}\n"
+                                        f"🎯 *Best Message Type*: {_slack_escape(raw_best_message_type)}\n\n"
+                                        f"----------------------------\n"
+                                        f"📝 *REFERRAL DRAFT*\n```{_slack_escape(raw_referral)}```\n"
+                                        f"----------------------------\n"
+                                        f"📝 *COFFEE CHAT DRAFT*\n```{_slack_escape(raw_coffee)}```\n"
+                                        f"----------------------------\n"
+                                        f"📝 *TECHNICAL DRAFT*\n```{_slack_escape(raw_technical)}```\n"
+                                        f"----------------------------\n"
+                                        f"📝 *RELATIONSHIP BUILDING DRAFT*\n```{_slack_escape(raw_relationship)}```\n"
+                                        f"----------------------------\n"
+                                        f"📝 *FEATURED OUTREACH DRAFT (No Limit)*\n```{_slack_escape(raw_featured)}```\n"
+                                        f"----------------------------\n"
+                                        f"_Review, select & copy from your networKING dashboard._"
+                                    )
+                                    await self._send_slack_alert(slack_webhook_url, slack_text)
+                        except Exception as notify_err:
+                            # Notification failures must never be treated as a generation/key
+                            # failure: the connection already succeeded and was committed above.
+                            print(f"[WORKER] {worker_name} notification build/send failed (non-fatal): {notify_err}")
 
                     except Exception as e:
                         # Catch quota/rate limit error (typically 429) or invalid keys

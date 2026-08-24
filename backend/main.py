@@ -7,12 +7,18 @@ from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, F
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 import models
 import schemas
 from database import engine, Base, get_db
 from auth import get_current_user, create_access_token, get_password_hash, verify_password
-from parser import parse_pdf_text, extract_linkedin_profile_metadata
+from parser import (
+    parse_pdf_text,
+    extract_linkedin_profile_metadata,
+    extract_resume_contact_info,
+    normalize_linkedin_slug,
+)
 from orchestrator import QueueOrchestrator
 from generator import (
     generate_thread_followup,
@@ -140,7 +146,9 @@ def register(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
         "portfolio_url", "linkedin_url", "telegram_token",
         "telegram_chat_id", "slack_webhook_url", "pacing_interval_minutes",
         "job_search_status", "target_roles", "learning_goals", "tone_examples",
-        "email_client_preference", "twin_understanding", "twin_extra_notes"
+        "email_client_preference", "twin_understanding", "twin_extra_notes",
+        "resume_filename", "contact_email", "contact_phone", "resume_location",
+        "custom_links", "tone_presets"
     ]
     for key in basic_keys:
         default_val = "15" if key == "pacing_interval_minutes" else ""
@@ -222,9 +230,38 @@ async def upload_resume(file: UploadFile = File(...), current_user: models.User 
     else:
         setting = models.Setting(user_id=current_user.id, key="resume_context", value=resume_text)
         db.add(setting)
-        
+
+    # Filename is tracked unconditionally so the TwinAgent tab can show what's
+    # currently uploaded, e.g. "resume_v3.pdf", instead of a generic checkmark.
+    _upsert_setting(db, current_user.id, "resume_filename", file.filename)
+
+    # Auto-fill social/contact links from the resume, but only into settings
+    # that are still empty -- never clobber something the user already typed
+    # in or already corrected by hand on a prior upload.
+    extracted = extract_resume_contact_info(resume_text)
+    existing_settings = {
+        s.key: s.value for s in db.query(models.Setting).filter(
+            models.Setting.user_id == current_user.id
+        ).all()
+    }
+    fill_only_if_empty = {
+        "github_url": extracted.get("github_url"),
+        "portfolio_url": extracted.get("portfolio_url"),
+        "linkedin_url": extracted.get("linkedin_url"),
+        "contact_email": extracted.get("email"),
+        "contact_phone": extracted.get("phone"),
+        "resume_location": extracted.get("location"),
+    }
+    for key, value in fill_only_if_empty.items():
+        if value and not (existing_settings.get(key) or "").strip():
+            _upsert_setting(db, current_user.id, key, value)
+
     db.commit()
-    return {"message": "Resume uploaded and compiled successfully.", "char_count": len(resume_text)}
+    return {
+        "message": "Resume uploaded and compiled successfully.",
+        "char_count": len(resume_text),
+        "detected": extracted,
+    }
 
 def _get_active_key_or_400(db: Session, user_id: int) -> models.ApiKey:
     key = db.query(models.ApiKey).filter(
@@ -469,7 +506,46 @@ async def create_connection(data: schemas.ConnectionCreate, current_user: models
     QueueOrchestrator().trigger_now(current_user.id)
     return new_conn
 
-@app.post("/api/connections/upload-profile", response_model=schemas.ConnectionOut)
+def _find_duplicate_connection(db: Session, user_id: int, profile_url: Optional[str], candidate_email: Optional[str], name: Optional[str], company: Optional[str]) -> Optional["models.Connection"]:
+    """
+    Looks for a Connection already belonging to this user that represents the
+    same real person, so a re-uploaded PDF (weeks or months later) refreshes
+    their existing pipeline entry instead of creating a disconnected
+    duplicate. Tried in order of reliability: LinkedIn profile slug (stable
+    across re-exports even when the raw URL string differs), then email,
+    then an exact name+company match as a last resort.
+    """
+    slug = normalize_linkedin_slug(profile_url or "")
+    if slug:
+        candidates = db.query(models.Connection).filter(
+            models.Connection.user_id == user_id,
+            models.Connection.profile_url.isnot(None)
+        ).all()
+        for c in candidates:
+            if normalize_linkedin_slug(c.profile_url) == slug:
+                return c
+
+    if candidate_email:
+        match = db.query(models.Connection).filter(
+            models.Connection.user_id == user_id,
+            models.Connection.candidate_email == candidate_email
+        ).first()
+        if match:
+            return match
+
+    if name and company:
+        match = db.query(models.Connection).filter(
+            models.Connection.user_id == user_id,
+            func.lower(models.Connection.name) == name.strip().lower(),
+            func.lower(models.Connection.company) == company.strip().lower(),
+        ).first()
+        if match:
+            return match
+
+    return None
+
+
+@app.post("/api/connections/upload-profile")
 async def upload_linkedin_profile(
     file: Optional[UploadFile] = File(None),
     screenshot: Optional[UploadFile] = File(None),
@@ -528,6 +604,64 @@ async def upload_linkedin_profile(
     if not name:
         raise HTTPException(status_code=400, detail="Candidate Name is required.")
 
+    existing = _find_duplicate_connection(db, current_user.id, profile_url, candidate_email, name, company)
+
+    if existing:
+        # Same person, re-uploaded later: refresh the raw profile fields but
+        # never touch pipeline state (status, star, sent/replied timestamps,
+        # generated drafts, AI analysis) -- that history belongs to this
+        # person regardless of how stale their title/company text was.
+        if screenshot_path and existing.screenshot_path and os.path.exists(existing.screenshot_path):
+            try:
+                os.remove(existing.screenshot_path)
+            except OSError as e:
+                print(f"[UPLOAD] Failed to remove stale screenshot {existing.screenshot_path}: {e}")
+
+        existing.name = name
+        existing.current_title = current_title or existing.current_title
+        existing.company = company or existing.company
+        existing.location = location or existing.location
+        if connection_count_val is not None:
+            existing.connection_count = connection_count_val
+        if years_experience:
+            existing.years_experience = years_experience
+        if profile_text:
+            existing.profile_text = profile_text
+        if posts:
+            existing.posts_text = posts
+        if profile_url:
+            existing.profile_url = profile_url
+        if screenshot_path:
+            existing.screenshot_path = screenshot_path
+        if hiring_badge_status:
+            existing.hiring_badge_status = hiring_badge_status
+        if pdf_filename:
+            existing.pdf_filename = pdf_filename
+        if candidate_email:
+            existing.candidate_email = candidate_email
+
+        needs_analysis = existing.status in ("pending", "failed")
+        if needs_analysis:
+            existing.status = "pending"
+            existing.error_message = None
+
+        db.commit()
+        db.refresh(existing)
+
+        if needs_analysis:
+            QueueOrchestrator().trigger_now(current_user.id)
+
+        when = existing.sent_at or existing.replied_at or existing.created_at
+        payload = schemas.ConnectionOut.model_validate(existing).model_dump(mode="json")
+        payload["duplicate_detected"] = True
+        payload["duplicate_message"] = (
+            f"Already in your pipeline (status: {existing.status}). "
+            f"Added {existing.created_at.date().isoformat()}"
+            + (f", last activity {when.date().isoformat()}" if when else "")
+            + ". Profile details refreshed from this PDF."
+        )
+        return payload
+
     new_conn = models.Connection(
         user_id=current_user.id,
         name=name,
@@ -551,7 +685,9 @@ async def upload_linkedin_profile(
     db.refresh(new_conn)
     # Auto-trigger queue worker to process this connection immediately
     QueueOrchestrator().trigger_now(current_user.id)
-    return new_conn
+    payload = schemas.ConnectionOut.model_validate(new_conn).model_dump(mode="json")
+    payload["duplicate_detected"] = False
+    return payload
 
 @app.put("/api/connections/{connection_id}/status", response_model=schemas.ConnectionOut)
 def update_connection_status(connection_id: int, payload: schemas.ConnectionUpdateStatus, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):

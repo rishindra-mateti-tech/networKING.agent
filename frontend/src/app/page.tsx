@@ -4,10 +4,29 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   Users, User, Key, Settings, LogOut, Search, Plus, Star, Trash2,
   Send, RefreshCw, Check, Copy, Clipboard, FileText, ArrowRight, MessageSquare, AlertCircle,
-  Zap, Loader2, Menu, X, BarChart3, ImagePlus, Sparkles, Mail, ExternalLink, ChevronDown, ChevronRight
+  Zap, Loader2, Menu, X, BarChart3, ImagePlus, Sparkles, Mail, ExternalLink, ChevronDown, ChevronRight,
+  Code2, Contact, Globe, Pencil, Link2
 } from "lucide-react";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+
+// Saves `value` a short delay after it stops changing, skipping the very
+// first render so the value fetchSettings() just loaded doesn't immediately
+// get written straight back to the server. Used for every field on the
+// Settings and TwinAgent Profile pages so there's no separate "Save" button.
+function useDebouncedSave(value: string, save: (v: string) => void, enabled: boolean, delay = 800) {
+  const isFirstRun = useRef(true);
+  useEffect(() => {
+    if (isFirstRun.current) {
+      isFirstRun.current = false;
+      return;
+    }
+    if (!enabled) return;
+    const t = setTimeout(() => save(value), delay);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, enabled]);
+}
 
 export default function Home() {
   // Authentication State
@@ -18,7 +37,7 @@ export default function Home() {
   const [authError, setAuthError] = useState("");
 
   // Global App State
-  const [currentView, setCurrentView] = useState<"pipeline" | "twinagent" | "apikeys" | "settings" | "insights" | "uploads">("pipeline");
+  const [currentView, setCurrentView] = useState<"pipeline" | "twinagent" | "apikeys" | "settings" | "insights" | "uploads" | "help-telegram" | "help-slack">("pipeline");
   const [connections, setConnections] = useState<any[]>([]);
   const [keys, setKeys] = useState<any[]>([]);
   const [settings, setSettings] = useState<any[]>([]);
@@ -55,7 +74,37 @@ export default function Home() {
   const [latexCode, setLatexCode] = useState("");
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [resumeUploadLoading, setResumeUploadLoading] = useState(false);
-  const [settingsSaveLoading, setSettingsSaveLoading] = useState(false);
+  const [resumeFilename, setResumeFilename] = useState("");
+
+  // Becomes true only after the initial GET /api/settings load finishes, so
+  // the autosave hooks below don't fire on the values fetchSettings itself
+  // just set -- only on actual edits the user makes afterward.
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+
+  // Social Links (auto-detected from resume + user-editable)
+  const [githubUrl, setGithubUrl] = useState("");
+  const [portfolioUrl, setPortfolioUrl] = useState("");
+  const [linkedinUrl, setLinkedinUrl] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [editingSocialField, setEditingSocialField] = useState<string | null>(null);
+  const [customLinks, setCustomLinks] = useState<{ id: string; label: string; url: string }[]>([]);
+  const [showAddLinkForm, setShowAddLinkForm] = useState(false);
+  const [editingCustomLinkId, setEditingCustomLinkId] = useState<string | null>(null);
+  const [newLinkLabel, setNewLinkLabel] = useState("");
+  const [newLinkUrl, setNewLinkUrl] = useState("");
+
+  // Job Search Details -- shown as saved-value text with an edit affordance,
+  // rather than an always-open input, so it's obvious what's actually saved.
+  const [editingTargetRoles, setEditingTargetRoles] = useState(false);
+  const [editingJobSearchStatus, setEditingJobSearchStatus] = useState(false);
+  const [editingLearningGoals, setEditingLearningGoals] = useState(false);
+
+  // Tone presets: tone_examples holds whichever preset's text is currently
+  // "active" (or "" for the built-in default); tone_presets is the saved list.
+  const [tonePresets, setTonePresets] = useState<{ name: string; text: string }[]>([]);
+  const [showDefaultTone, setShowDefaultTone] = useState(false);
+  const [showSavePresetForm, setShowSavePresetForm] = useState(false);
+  const [newPresetName, setNewPresetName] = useState("");
 
   // TwinAgent understanding + teach-me chat
   const [twinUnderstanding, setTwinUnderstanding] = useState("");
@@ -109,11 +158,13 @@ export default function Home() {
     onConfirm: () => void;
   } | null>(null);
 
-  // Toasts, replacing window.alert for the same reason.
-  const [toast, setToast] = useState<{ text: string; tone: "ok" | "error" } | null>(null);
-  const showToast = (text: string, tone: "ok" | "error" = "ok") => {
+  // Toasts, replacing window.alert for the same reason. "info" is a neutral
+  // heads-up (e.g. "this person is already in your pipeline") -- distinct
+  // from "ok" (something succeeded) and "error" (something failed).
+  const [toast, setToast] = useState<{ text: string; tone: "ok" | "error" | "info" } | null>(null);
+  const showToast = (text: string, tone: "ok" | "error" | "info" = "ok") => {
     setToast({ text, tone });
-    setTimeout(() => setToast(null), 4000);
+    setTimeout(() => setToast(null), 5000);
   };
 
   // References
@@ -320,11 +371,62 @@ export default function Home() {
         setTwinUnderstanding(mapped["twin_understanding"] || "");
         setTwinExtraNotes(mapped["twin_extra_notes"] || "");
         setPacingInterval(mapped["pacing_interval_minutes"] || "15");
+        setResumeFilename(mapped["resume_filename"] || "");
+        setGithubUrl(mapped["github_url"] || "");
+        setPortfolioUrl(mapped["portfolio_url"] || "");
+        setLinkedinUrl(mapped["linkedin_url"] || "");
+        setContactEmail(mapped["contact_email"] || "");
+        try {
+          setCustomLinks(mapped["custom_links"] ? JSON.parse(mapped["custom_links"]) : []);
+        } catch {
+          setCustomLinks([]);
+        }
+        try {
+          setTonePresets(mapped["tone_presets"] ? JSON.parse(mapped["tone_presets"]) : []);
+        } catch {
+          setTonePresets([]);
+        }
+        setSettingsLoaded(true);
       }
     } catch (e) {
       console.error(e);
     }
   };
+
+  // Saves exactly one setting key -- the unit the autosave hooks below work in.
+  const saveSetting = async (key: string, value: string) => {
+    try {
+      await fetchWithAuth("/api/settings/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings: [{ key, value }] })
+      });
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Autosave -- every field below persists itself a moment after the user
+  // stops typing/toggling it. No separate "Save" button needed anywhere
+  // these are used (Settings tab, TwinAgent Profile tab).
+  useDebouncedSave(telegramToken, (v) => saveSetting("telegram_token", v), settingsLoaded);
+  useDebouncedSave(telegramChatId, (v) => saveSetting("telegram_chat_id", v), settingsLoaded);
+  useDebouncedSave(slackWebhookUrl, (v) => saveSetting("slack_webhook_url", v), settingsLoaded);
+  useDebouncedSave(pacingInterval, (v) => saveSetting("pacing_interval_minutes", v), settingsLoaded);
+  useDebouncedSave(emailClientPreference, (v) => saveSetting("email_client_preference", v), settingsLoaded);
+  useDebouncedSave(targetRoles, (v) => saveSetting("target_roles", v), settingsLoaded);
+  useDebouncedSave(jobSearchStatus, (v) => saveSetting("job_search_status", v), settingsLoaded);
+  useDebouncedSave(learningGoals, (v) => saveSetting("learning_goals", v), settingsLoaded);
+  useDebouncedSave(toneExamples, (v) => saveSetting("tone_examples", v), settingsLoaded);
+  useDebouncedSave(latexCode, (v) => saveSetting("resume_latex", v), settingsLoaded);
+  useDebouncedSave(twinUnderstanding, (v) => saveSetting("twin_understanding", v), settingsLoaded);
+  useDebouncedSave(twinExtraNotes, (v) => saveSetting("twin_extra_notes", v), settingsLoaded);
+  useDebouncedSave(githubUrl, (v) => saveSetting("github_url", v), settingsLoaded);
+  useDebouncedSave(portfolioUrl, (v) => saveSetting("portfolio_url", v), settingsLoaded);
+  useDebouncedSave(linkedinUrl, (v) => saveSetting("linkedin_url", v), settingsLoaded);
+  useDebouncedSave(contactEmail, (v) => saveSetting("contact_email", v), settingsLoaded);
+  useDebouncedSave(JSON.stringify(customLinks), (v) => saveSetting("custom_links", v), settingsLoaded);
+  useDebouncedSave(JSON.stringify(tonePresets), (v) => saveSetting("tone_presets", v), settingsLoaded);
 
   // Auth Operations
   const handleAuthSubmit = async (e: React.FormEvent) => {
@@ -377,43 +479,6 @@ export default function Home() {
     setSelectedConnection(null);
   };
 
-  // Settings Save
-  const handleSaveSettings = async () => {
-    setSettingsSaveLoading(true);
-    const batch = {
-      settings: [
-        { key: "target_roles", value: targetRoles },
-        { key: "job_search_status", value: jobSearchStatus },
-        { key: "learning_goals", value: learningGoals },
-        { key: "tone_examples", value: toneExamples },
-        { key: "resume_latex", value: latexCode },
-        { key: "twin_understanding", value: twinUnderstanding },
-        { key: "twin_extra_notes", value: twinExtraNotes },
-        { key: "telegram_token", value: telegramToken },
-        { key: "telegram_chat_id", value: telegramChatId },
-        { key: "slack_webhook_url", value: slackWebhookUrl },
-        { key: "email_client_preference", value: emailClientPreference },
-        { key: "pacing_interval_minutes", value: pacingInterval }
-      ]
-    };
-    
-    try {
-      const res = await fetchWithAuth("/api/settings/batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(batch)
-      });
-      if (res.ok) {
-        showToast("TwinAgent configuration saved.");
-        fetchSettings();
-      }
-    } catch (e) {
-      showToast("Failed to save settings.", "error");
-    } finally {
-      setSettingsSaveLoading(false);
-    }
-  };
-
   // Resume PDF Upload
   const handleResumeUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
@@ -428,7 +493,15 @@ export default function Home() {
         body: formData
       });
       if (res.ok) {
-        showToast("Resume uploaded and parsed.");
+        const d = await res.json();
+        setResumeFilename(file.name);
+        const detected = d.detected || {};
+        const foundCount = ["github_url", "portfolio_url", "linkedin_url", "email"].filter((k) => detected[k]).length;
+        showToast(
+          foundCount > 0
+            ? `Resume uploaded and parsed. Detected ${foundCount} social/contact link${foundCount === 1 ? "" : "s"} -- check Social Links below.`
+            : "Resume uploaded and parsed."
+        );
         fetchSettings();
       } else {
         const d = await res.json();
@@ -548,6 +621,7 @@ export default function Home() {
     try {
       if (connPdfFiles.length > 0 || connScreenshotFile || newConnUrl) {
         // Multi-part creation (PDF/Screenshot/URL)
+        const duplicateMessages: string[] = [];
         if (connPdfFiles.length > 0) {
           for (const file of connPdfFiles) {
             const formData = new FormData();
@@ -566,9 +640,11 @@ export default function Home() {
               method: "POST",
               body: formData
             });
+            const d = await res.json();
             if (!res.ok) {
-              const d = await res.json();
               console.error("Failed to process file:", file.name, d.detail);
+            } else if (d.duplicate_detected) {
+              duplicateMessages.push(d.duplicate_message || `${d.name} is already in your pipeline.`);
             }
           }
         } else {
@@ -587,12 +663,21 @@ export default function Home() {
             method: "POST",
             body: formData
           });
+          const d = await res.json();
           if (!res.ok) {
-            const d = await res.json();
             showToast(d.detail || "Failed to process target details.", "error");
             setConnUploadLoading(false);
             return;
           }
+          if (d.duplicate_detected) {
+            duplicateMessages.push(d.duplicate_message || `${d.name} is already in your pipeline.`);
+          }
+        }
+
+        if (duplicateMessages.length === 1) {
+          showToast(duplicateMessages[0], "info");
+        } else if (duplicateMessages.length > 1) {
+          showToast(`${duplicateMessages.length} of these were already in your pipeline and got refreshed instead of duplicated.`, "info");
         }
 
         setShowAddModal(false);
@@ -1040,7 +1125,7 @@ export default function Home() {
   }
 
   // --- SAAS DASHBOARD INTERFACE ---
-  const goToView = (view: "pipeline" | "twinagent" | "apikeys" | "settings" | "insights" | "uploads") => {
+  const goToView = (view: "pipeline" | "twinagent" | "apikeys" | "settings" | "insights" | "uploads" | "help-telegram" | "help-slack") => {
     setCurrentView(view);
     setSelectedConnection(null);
     setMobileNavOpen(false);
@@ -1193,7 +1278,16 @@ export default function Home() {
           </button>
         </nav>
 
-        <div className="p-4 border-t border-zinc-800">
+        <div className="p-4 border-t border-zinc-800 space-y-1">
+          <a
+            href="https://github.com/rishindra-mateti-tech/networKING.agent"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium text-zinc-400 hover:bg-amber-950/20 hover:text-amber-400 transition-colors cursor-pointer"
+          >
+            <Star size={18} />
+            <span>Star this repo</span>
+          </a>
           <button
             onClick={handleLogout}
             className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium text-zinc-400 hover:bg-rose-950/20 hover:text-rose-400 transition-colors cursor-pointer"
@@ -1320,7 +1414,7 @@ export default function Home() {
                 </button>
                 <button 
                   onClick={() => setShowAddModal(true)}
-                  className="bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 hover:border-zinc-700 text-sm font-semibold text-zinc-300 hover:text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors cursor-pointer shadow-md"
+                  className="bg-emerald-950/30 border border-emerald-800/50 hover:bg-emerald-900/40 hover:border-emerald-600 text-sm font-semibold text-emerald-400 hover:text-emerald-300 px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors cursor-pointer shadow-md"
                 >
                   <Plus size={16} />
                   <span>Add Outreach Target</span>
@@ -1518,7 +1612,7 @@ export default function Home() {
                 </div>
                 <button
                   onClick={() => setShowAddModal(true)}
-                  className="bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-300 hover:text-white px-3 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
+                  className="bg-emerald-950/30 hover:bg-emerald-900/40 border border-emerald-800/50 hover:border-emerald-600 text-emerald-400 hover:text-emerald-300 px-3 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
                 >
                   <Plus size={13} /> Add
                 </button>
@@ -1775,7 +1869,7 @@ export default function Home() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              
+
               {/* PDF Resume Drag Zone */}
               <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 flex flex-col justify-between">
                 <div>
@@ -1784,19 +1878,19 @@ export default function Home() {
                     <span>Upload Resume PDF</span>
                   </h3>
                   <p className="text-xs text-zinc-400 mb-6">
-                    Parsing your PDF resume imports raw text data, enabling structural relevance matching.
+                    Parsing your PDF resume imports raw text data and auto-fills your Social Links below.
                   </p>
                 </div>
-                
+
                 <div className="border border-dashed border-zinc-800 hover:border-zinc-700 rounded-lg p-8 text-center bg-zinc-950/50 hover:bg-zinc-950 transition-colors flex flex-col items-center justify-center group">
-                  <input 
-                    type="file" 
+                  <input
+                    type="file"
                     accept=".pdf"
                     ref={resumeInputRef}
                     onChange={handleResumeUpload}
                     className="hidden"
                   />
-                  <button 
+                  <button
                     onClick={() => resumeInputRef.current?.click()}
                     disabled={resumeUploadLoading}
                     className="text-xs bg-zinc-900 border border-zinc-800 hover:border-zinc-700 px-4 py-2 rounded text-zinc-300 hover:text-white transition-colors cursor-pointer disabled:opacity-50"
@@ -1804,76 +1898,316 @@ export default function Home() {
                     {resumeUploadLoading ? "Uploading & Parsing..." : "Choose PDF File"}
                   </button>
                   <span className="text-[10px] text-zinc-500 mt-2 block font-mono">Supports up to 5MB PDF</span>
+                  {resumeFilename && (
+                    <span className="text-[10px] text-emerald-400 mt-3 flex items-center gap-1.5">
+                      <FileText size={11} /> {resumeFilename}
+                    </span>
+                  )}
                 </div>
               </div>
 
-              {/* Basic Meta Inputs */}
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-4">
-                <h3 className="text-sm font-semibold text-white mb-2">Job Search Details</h3>
-                <div>
-                  <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">Target Roles</label>
-                  <input 
-                    type="text" 
-                    value={targetRoles}
-                    onChange={e => setTargetRoles(e.target.value)}
-                    placeholder="e.g. Software Engineer, Full Stack, AI Platform Eng"
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-zinc-700"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">Job Search / Visa Status</label>
-                  <input 
-                    type="text" 
-                    value={jobSearchStatus}
-                    onChange={e => setJobSearchStatus(e.target.value)}
-                    placeholder="e.g. Active job search on OPT visa"
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-zinc-700"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">Primary Learning Goals</label>
-                  <input 
-                    type="text" 
-                    value={learningGoals}
-                    onChange={e => setLearningGoals(e.target.value)}
-                    placeholder="e.g. distributed systems, database design, AI Agent safety"
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-zinc-700"
-                  />
-                </div>
+              {/* LaTeX paste code box, moved up next to the resume upload */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 flex flex-col">
+                <h3 className="text-sm font-semibold text-white mb-2 flex items-center space-x-2">
+                  <FileText size={16} className="text-emerald-400" />
+                  <span>Resume LaTeX Code Source</span>
+                </h3>
+                <p className="text-xs text-zinc-400 mb-4">
+                  Pasting LaTeX markup allows TwinAgent to inspect details with zero structural formatting bugs.
+                </p>
+                <textarea
+                  value={latexCode}
+                  onChange={e => setLatexCode(e.target.value)}
+                  rows={8}
+                  className="w-full flex-1 bg-zinc-950 border border-zinc-800 rounded-lg p-4 text-xs font-mono text-emerald-400 focus:outline-none focus:border-emerald-500/50"
+                  placeholder="Paste your resume latex syntax block here..."
+                />
               </div>
             </div>
 
-            {/* LaTeX paste code box */}
+            {/* Social Links */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
               <h3 className="text-sm font-semibold text-white mb-2 flex items-center space-x-2">
-                <FileText size={16} className="text-emerald-400" />
-                <span>Resume LaTeX Code Source (Avoids context loss)</span>
+                <Link2 size={16} className="text-zinc-400" />
+                <span>Social Links</span>
               </h3>
               <p className="text-xs text-zinc-400 mb-4">
-                Pasting LaTeX markup allows TwinAgent to inspect details with zero structural formatting bugs.
+                Auto-detected from your resume when available. Clickable so you can verify them, and used when a
+                conversation calls for sharing a link directly (e.g. a recruiter asking for your GitHub).
               </p>
-              <textarea 
-                value={latexCode}
-                onChange={e => setLatexCode(e.target.value)}
-                rows={10}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-4 text-xs font-mono text-emerald-400 focus:outline-none focus:border-emerald-500/50"
-                placeholder="Paste your resume latex syntax block here..."
-              />
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {[
+                  { key: "linkedin_url", label: "LinkedIn", value: linkedinUrl, setValue: setLinkedinUrl, Icon: Contact, isEmail: false },
+                  { key: "github_url", label: "GitHub", value: githubUrl, setValue: setGithubUrl, Icon: Code2, isEmail: false },
+                  { key: "portfolio_url", label: "Portfolio", value: portfolioUrl, setValue: setPortfolioUrl, Icon: Globe, isEmail: false },
+                  { key: "contact_email", label: "Email", value: contactEmail, setValue: setContactEmail, Icon: Mail, isEmail: true },
+                ].map(chip => (
+                  <div key={chip.key} className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2">
+                    <chip.Icon size={14} className="text-zinc-400 shrink-0" />
+                    {editingSocialField === chip.key ? (
+                      <input
+                        autoFocus
+                        type="text"
+                        value={chip.value}
+                        onChange={e => chip.setValue(e.target.value)}
+                        onBlur={() => setEditingSocialField(null)}
+                        onKeyDown={e => { if (e.key === "Enter") setEditingSocialField(null); }}
+                        placeholder={`Add ${chip.label} link`}
+                        className="flex-1 min-w-0 bg-transparent text-xs text-zinc-200 focus:outline-none"
+                      />
+                    ) : chip.value ? (
+                      <a
+                        href={chip.isEmail ? `mailto:${chip.value}` : (chip.value.startsWith("http") ? chip.value : `https://${chip.value}`)}
+                        target={chip.isEmail ? undefined : "_blank"}
+                        rel="noopener noreferrer"
+                        className="flex-1 min-w-0 text-xs text-zinc-200 hover:text-emerald-400 truncate"
+                      >
+                        {chip.value}
+                      </a>
+                    ) : (
+                      <span className="flex-1 text-xs text-zinc-600 italic">Not set</span>
+                    )}
+                    <button
+                      onClick={() => setEditingSocialField(editingSocialField === chip.key ? null : chip.key)}
+                      className="text-zinc-500 hover:text-white shrink-0 cursor-pointer"
+                    >
+                      <Pencil size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {customLinks.length > 0 && (
+                <div className="mt-2 space-y-2">
+                  {customLinks.map(link => (
+                    editingCustomLinkId === link.id ? (
+                      <div key={link.id} className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2">
+                        <input
+                          value={link.label}
+                          onChange={e => setCustomLinks(prev => prev.map(l => l.id === link.id ? { ...l, label: e.target.value } : l))}
+                          placeholder="Label"
+                          className="w-28 shrink-0 bg-transparent text-xs text-zinc-200 focus:outline-none border-r border-zinc-800 pr-2"
+                        />
+                        <input
+                          value={link.url}
+                          onChange={e => setCustomLinks(prev => prev.map(l => l.id === link.id ? { ...l, url: e.target.value } : l))}
+                          placeholder="https://..."
+                          className="flex-1 min-w-0 bg-transparent text-xs text-zinc-200 focus:outline-none"
+                        />
+                        <button onClick={() => setEditingCustomLinkId(null)} className="text-emerald-400 hover:text-emerald-300 shrink-0 cursor-pointer">
+                          <Check size={13} />
+                        </button>
+                      </div>
+                    ) : (
+                      <div key={link.id} className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2">
+                        <Link2 size={14} className="text-zinc-400 shrink-0" />
+                        <span className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider shrink-0">{link.label}</span>
+                        <a href={link.url} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-0 text-xs text-zinc-200 hover:text-emerald-400 truncate">
+                          {link.url}
+                        </a>
+                        <button onClick={() => setEditingCustomLinkId(link.id)} className="text-zinc-500 hover:text-white shrink-0 cursor-pointer">
+                          <Pencil size={12} />
+                        </button>
+                        <button onClick={() => setCustomLinks(prev => prev.filter(l => l.id !== link.id))} className="text-zinc-500 hover:text-rose-400 shrink-0 cursor-pointer">
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    )
+                  ))}
+                </div>
+              )}
+
+              <div className="mt-3">
+                {showAddLinkForm ? (
+                  <div className="flex items-center gap-2 bg-zinc-950 border border-emerald-800/50 rounded-lg px-3 py-2">
+                    <input
+                      autoFocus
+                      value={newLinkLabel}
+                      onChange={e => setNewLinkLabel(e.target.value)}
+                      placeholder="Label (e.g. Portfolio)"
+                      className="w-32 shrink-0 bg-transparent text-xs text-zinc-200 focus:outline-none border-r border-zinc-800 pr-2"
+                    />
+                    <input
+                      value={newLinkUrl}
+                      onChange={e => setNewLinkUrl(e.target.value)}
+                      placeholder="https://..."
+                      className="flex-1 min-w-0 bg-transparent text-xs text-zinc-200 focus:outline-none"
+                    />
+                    <button
+                      onClick={() => {
+                        if (!newLinkLabel.trim() || !newLinkUrl.trim()) return;
+                        setCustomLinks(prev => [...prev, { id: `${Date.now()}`, label: newLinkLabel.trim(), url: newLinkUrl.trim() }]);
+                        setNewLinkLabel("");
+                        setNewLinkUrl("");
+                        setShowAddLinkForm(false);
+                      }}
+                      className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 shrink-0 cursor-pointer"
+                    >
+                      Add
+                    </button>
+                    <button
+                      onClick={() => { setShowAddLinkForm(false); setNewLinkLabel(""); setNewLinkUrl(""); }}
+                      className="text-zinc-500 hover:text-white shrink-0 cursor-pointer"
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setShowAddLinkForm(true)}
+                    className="text-xs font-semibold text-zinc-400 hover:text-white flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Plus size={13} /> Add link
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Job Search Details */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold text-white mb-1">Job Search Details</h3>
+                <p className="text-xs text-zinc-400">
+                  Optional, but the model treats whatever's saved here as fact by default. Edit or clear any of these any time.
+                </p>
+              </div>
+              {[
+                { key: "target_roles", label: "Target Roles", value: targetRoles, setValue: setTargetRoles, editing: editingTargetRoles, setEditing: setEditingTargetRoles, placeholder: "e.g. Software Engineer, Full Stack, AI Platform Eng" },
+                { key: "job_search_status", label: "Job Search / Visa Status", value: jobSearchStatus, setValue: setJobSearchStatus, editing: editingJobSearchStatus, setEditing: setEditingJobSearchStatus, placeholder: "e.g. Active job search on OPT visa" },
+                { key: "learning_goals", label: "Primary Learning Goals", value: learningGoals, setValue: setLearningGoals, editing: editingLearningGoals, setEditing: setEditingLearningGoals, placeholder: "e.g. distributed systems, database design, AI Agent safety" },
+              ].map(field => (
+                <div key={field.key}>
+                  <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">{field.label}</label>
+                  {field.editing ? (
+                    <input
+                      autoFocus
+                      type="text"
+                      value={field.value}
+                      onChange={e => field.setValue(e.target.value)}
+                      onBlur={() => field.setEditing(false)}
+                      onKeyDown={e => { if (e.key === "Enter") field.setEditing(false); }}
+                      placeholder={field.placeholder}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-zinc-700"
+                    />
+                  ) : (
+                    <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded px-3 py-2">
+                      <span className={`flex-1 min-w-0 text-xs truncate ${field.value ? "text-zinc-200" : "text-zinc-600 italic"}`}>
+                        {field.value || "Not set"}
+                      </span>
+                      <button onClick={() => field.setEditing(true)} className="text-zinc-500 hover:text-white shrink-0 cursor-pointer">
+                        <Pencil size={12} />
+                      </button>
+                      {field.value && (
+                        <button onClick={() => field.setValue("")} className="text-zinc-500 hover:text-rose-400 shrink-0 cursor-pointer">
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
 
             {/* Tone Guidelines */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
-              <h3 className="text-sm font-semibold text-white mb-2">Outreach Tone Guidelines & Examples</h3>
-              <p className="text-xs text-zinc-400 mb-4">
-                Paste examples of successful or personal messages you have previously sent. TwinAgent will mimic your exact writing pattern.
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-4">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <h3 className="text-sm font-semibold text-white">Outreach Tone Guidelines</h3>
+                <button
+                  onClick={() => setShowDefaultTone(v => !v)}
+                  className="text-[10px] font-semibold text-zinc-400 hover:text-white cursor-pointer"
+                >
+                  {showDefaultTone ? "Hide default tone" : "Show default tone"}
+                </button>
+              </div>
+              <p className="text-xs text-zinc-400">
+                Whichever preset is selected below is what TwinAgent writes in. Switch between saved tones any time, or write a new one.
               </p>
-              <textarea 
+
+              {showDefaultTone && (
+                <div className="bg-zinc-950/60 border border-white/10 rounded-lg p-4 text-[11px] text-zinc-300 leading-relaxed space-y-1.5">
+                  <p className="text-zinc-500 font-semibold uppercase tracking-wider text-[10px] mb-2">Built-in default voice</p>
+                  <p>Polite, humble, and requesting, always acknowledging that the other person's time is valuable ("no pressure", "I'd be grateful for any advice").</p>
+                  <p>Short, natural sentences like a real person typing, not a business letter. Contractions expected. No em dashes, ever.</p>
+                  <p>Opens with something specific and true about them, never a compliment sandwich or "hope this finds you well".</p>
+                  <p>No corporate/LinkedIn-influencer buzzwords: "delve", "leverage", "synergy", "circle back", "pick your brain", "thought leader", "excited to connect".</p>
+                  <p>No hype or stacked adjectives, describes what they actually did instead of praising it in the abstract.</p>
+                  <p>Ends with a real, specific ask, not a generic "looking forward to hearing from you!"</p>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => setToneExamples("")}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold border transition-colors cursor-pointer ${
+                    toneExamples === ""
+                      ? "bg-white/10 border-white/20 text-white"
+                      : "bg-zinc-950/60 border-white/10 text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  Default
+                </button>
+                {tonePresets.map(preset => (
+                  <button
+                    key={preset.name}
+                    onClick={() => setToneExamples(preset.text)}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold border transition-colors cursor-pointer ${
+                      toneExamples !== "" && toneExamples === preset.text
+                        ? "bg-white/10 border-white/20 text-white"
+                        : "bg-zinc-950/60 border-white/10 text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    {preset.name}
+                  </button>
+                ))}
+              </div>
+
+              <textarea
                 value={toneExamples}
                 onChange={e => setToneExamples(e.target.value)}
                 rows={4}
                 className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-4 text-xs text-zinc-200 focus:outline-none focus:border-zinc-700"
                 placeholder="e.g., Hi name, loved your post on X. I'm also looking into Y. Would you be open to a quick call next week?"
               />
+
+              <div className="flex items-center gap-2">
+                {showSavePresetForm ? (
+                  <>
+                    <input
+                      autoFocus
+                      type="text"
+                      value={newPresetName}
+                      onChange={e => setNewPresetName(e.target.value)}
+                      placeholder="Preset name, e.g. Tone 1"
+                      className="bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-zinc-700"
+                    />
+                    <button
+                      onClick={() => {
+                        if (!newPresetName.trim()) return;
+                        setTonePresets(prev => [...prev.filter(p => p.name !== newPresetName.trim()), { name: newPresetName.trim(), text: toneExamples }]);
+                        setNewPresetName("");
+                        setShowSavePresetForm(false);
+                      }}
+                      className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 cursor-pointer"
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={() => { setShowSavePresetForm(false); setNewPresetName(""); }}
+                      className="text-zinc-500 hover:text-white cursor-pointer"
+                    >
+                      <X size={14} />
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => setShowSavePresetForm(true)}
+                    className="text-xs font-semibold text-zinc-400 hover:text-white cursor-pointer"
+                  >
+                    Save as new preset...
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* What the agent understood, so a wrong reading gets caught here
@@ -2003,16 +2337,9 @@ export default function Home() {
               )}
             </div>
 
-            <div className="flex justify-end pt-4">
-              <button
-                onClick={handleSaveSettings}
-                disabled={settingsSaveLoading}
-                className="bg-zinc-900 border border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-white hover:border-zinc-700 text-sm font-semibold px-6 py-3 rounded-lg transition-colors cursor-pointer shadow-lg disabled:opacity-50"
-              >
-                {settingsSaveLoading ? "Saving Persona..." : "Save TwinAgent Configuration"}
-              </button>
-
-            </div>
+            <p className="text-[10px] text-zinc-500 text-center pt-2">
+              Every field on this page saves automatically a moment after you stop editing it.
+            </p>
           </div>
         )}
 
@@ -2034,7 +2361,17 @@ export default function Home() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {/* Add Key Form */}
               <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 md:col-span-1 h-fit">
-                <h3 className="text-sm font-semibold text-white mb-4">Add API Key</h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-semibold text-white">Add API Key</h3>
+                  <a
+                    href="https://aistudio.google.com/apikey"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
+                  >
+                    Get a free key <ExternalLink size={10} />
+                  </a>
+                </div>
                 <form onSubmit={handleAddApiKey} className="space-y-4">
                   <div>
                     <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">Key Value</label>
@@ -2162,20 +2499,28 @@ export default function Home() {
             </div>
 
             <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-6">
-              
+
               {/* Telegram config */}
               <div className="space-y-4">
-                <h3 className="text-sm font-semibold text-white flex items-center space-x-2">
-                  <Send size={16} className="text-blue-400" />
-                  <span>Telegram Bot Integration</span>
-                </h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-white flex items-center space-x-2">
+                    <Send size={16} className="text-blue-400" />
+                    <span>Telegram Bot Integration</span>
+                  </h3>
+                  <button
+                    onClick={() => goToView("help-telegram")}
+                    className="text-[10px] font-semibold text-blue-400 hover:text-blue-300 flex items-center gap-1 cursor-pointer"
+                  >
+                    How do I get this? <ExternalLink size={10} />
+                  </button>
+                </div>
                 <p className="text-xs text-zinc-400">
                   Workers will send generated drafts straight to your private Telegram chat. Create a bot using `@BotFather` to get a token.
                 </p>
 
                 <div>
                   <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">Telegram Bot Token</label>
-                  <input 
+                  <input
                     type="password"
                     value={telegramToken}
                     onChange={e => setTelegramToken(e.target.value)}
@@ -2185,7 +2530,7 @@ export default function Home() {
                 </div>
                 <div>
                   <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">Chat ID</label>
-                  <input 
+                  <input
                     type="text"
                     value={telegramChatId}
                     onChange={e => setTelegramChatId(e.target.value)}
@@ -2193,16 +2538,41 @@ export default function Home() {
                     className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-zinc-700"
                   />
                 </div>
+                <button
+                  onClick={handleTestTelegram}
+                  disabled={telegramTestLoading}
+                  className="bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 hover:text-white px-4 py-2.5 rounded border border-zinc-700 hover:border-zinc-600 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {telegramTestLoading ? "Testing..." : "Test Telegram Connection"}
+                </button>
+                {telegramTestMessage && (
+                  <div className="text-xs text-emerald-400 bg-emerald-950/20 border border-emerald-900/30 rounded-lg p-3">
+                    {telegramTestMessage}
+                  </div>
+                )}
+                {telegramTestError && (
+                  <div className="text-xs text-rose-400 bg-rose-950/20 border border-rose-900/30 rounded-lg p-3">
+                    {telegramTestError}
+                  </div>
+                )}
               </div>
 
               <hr className="border-zinc-800" />
 
               {/* Slack config */}
               <div className="space-y-4">
-                <h3 className="text-sm font-semibold text-white flex items-center space-x-2">
-                  <Send size={16} className="text-emerald-400" />
-                  <span>Slack Integration</span>
-                </h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-white flex items-center space-x-2">
+                    <Send size={16} className="text-emerald-400" />
+                    <span>Slack Integration</span>
+                  </h3>
+                  <button
+                    onClick={() => goToView("help-slack")}
+                    className="text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
+                  >
+                    How do I get this? <ExternalLink size={10} />
+                  </button>
+                </div>
                 <p className="text-xs text-zinc-400">
                   Workers will post generated drafts to a Slack channel via an Incoming Webhook. Create one at <span className="font-mono text-zinc-300">api.slack.com/apps</span> &rarr; your app &rarr; Incoming Webhooks &rarr; Add New Webhook.
                 </p>
@@ -2217,6 +2587,23 @@ export default function Home() {
                     className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-zinc-700"
                   />
                 </div>
+                <button
+                  onClick={handleTestSlack}
+                  disabled={slackTestLoading}
+                  className="bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 hover:text-white px-4 py-2.5 rounded border border-zinc-700 hover:border-zinc-600 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {slackTestLoading ? "Testing..." : "Test Slack Connection"}
+                </button>
+                {slackTestMessage && (
+                  <div className="text-xs text-emerald-400 bg-emerald-950/20 border border-emerald-900/30 rounded-lg p-3">
+                    {slackTestMessage}
+                  </div>
+                )}
+                {slackTestError && (
+                  <div className="text-xs text-rose-400 bg-rose-950/20 border border-rose-900/30 rounded-lg p-3">
+                    {slackTestError}
+                  </div>
+                )}
               </div>
 
               <hr className="border-zinc-800" />
@@ -2273,50 +2660,73 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="flex justify-end items-center pt-4 space-x-3">
-                <button 
-                  onClick={handleTestTelegram}
-                  disabled={telegramTestLoading}
-                  className="bg-zinc-800 hover:bg-zinc-800 text-xs font-semibold text-zinc-300 hover:text-white px-4 py-2.5 rounded border border-zinc-700 hover:border-zinc-600 transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  {telegramTestLoading ? "Testing..." : "Test Telegram Connection"}
-                </button>
-                <button
-                  onClick={handleTestSlack}
-                  disabled={slackTestLoading}
-                  className="bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 hover:text-white px-4 py-2.5 rounded border border-zinc-700 hover:border-zinc-600 transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  {slackTestLoading ? "Testing..." : "Test Slack Connection"}
-                </button>
-                <button
-                  onClick={handleSaveSettings}
-                  className="bg-zinc-900 border border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-white hover:border-zinc-700 text-xs font-semibold px-4 py-2.5 rounded transition-colors cursor-pointer shadow-lg"
-                >
-                  Save Configuration
-                </button>
+              <p className="text-[10px] text-zinc-500 text-center pt-1">
+                Every field on this page saves automatically a moment after you stop editing it.
+              </p>
+            </div>
+          </div>
+        )}
 
-              </div>
+        {/* Telegram setup help */}
+        {currentView === "help-telegram" && (
+          <div className="p-4 sm:p-8 max-w-xl w-full mx-auto space-y-6">
+            <div className="border-b border-zinc-800 pb-4">
+              <button
+                onClick={() => goToView("settings")}
+                className="text-[10px] font-semibold text-zinc-400 hover:text-white mb-2 cursor-pointer"
+              >
+                &larr; Back to Settings
+              </button>
+              <h2 className="text-2xl font-bold text-white bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-400">
+                Getting a Telegram bot token &amp; chat ID
+              </h2>
+            </div>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-4 text-xs text-zinc-300 leading-relaxed">
+              <ol className="space-y-3 list-decimal list-inside">
+                <li>Open Telegram and search for <span className="font-mono text-zinc-100">@BotFather</span> (the official bot that creates other bots).</li>
+                <li>Send it <span className="font-mono text-zinc-100">/newbot</span> and follow the prompts: pick a display name, then a username ending in <span className="font-mono text-zinc-100">bot</span>.</li>
+                <li>BotFather replies with a token that looks like <span className="font-mono text-zinc-100">123456789:AAExxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</span>. That's your <strong className="text-white">Telegram Bot Token</strong> above.</li>
+                <li>Open a chat with your new bot and send it any message (e.g. "hi") so Telegram knows you two have talked.</li>
+                <li>
+                  In a browser, visit{" "}
+                  <span className="font-mono text-zinc-100 break-all">https://api.telegram.org/bot&lt;YOUR_TOKEN&gt;/getUpdates</span>{" "}
+                  (with your real token in place of <span className="font-mono">&lt;YOUR_TOKEN&gt;</span>). Look for <span className="font-mono text-zinc-100">"chat":{"{"}"id":...</span> in the response, that number is your <strong className="text-white">Chat ID</strong>.
+                </li>
+                <li>Paste both values into Settings, they save automatically. Click "Test Telegram Connection" to confirm.</li>
+              </ol>
+            </div>
+          </div>
+        )}
 
-              {telegramTestMessage && (
-                <div className="text-xs text-emerald-400 bg-emerald-950/20 border border-emerald-900/30 rounded-lg p-3 mt-3">
-                  {telegramTestMessage}
-                </div>
-              )}
-              {telegramTestError && (
-                <div className="text-xs text-rose-400 bg-rose-950/20 border border-rose-900/30 rounded-lg p-3 mt-3">
-                  {telegramTestError}
-                </div>
-              )}
-              {slackTestMessage && (
-                <div className="text-xs text-emerald-400 bg-emerald-950/20 border border-emerald-900/30 rounded-lg p-3 mt-3">
-                  {slackTestMessage}
-                </div>
-              )}
-              {slackTestError && (
-                <div className="text-xs text-rose-400 bg-rose-950/20 border border-rose-900/30 rounded-lg p-3 mt-3">
-                  {slackTestError}
-                </div>
-              )}
+        {/* Slack setup help */}
+        {currentView === "help-slack" && (
+          <div className="p-4 sm:p-8 max-w-xl w-full mx-auto space-y-6">
+            <div className="border-b border-zinc-800 pb-4">
+              <button
+                onClick={() => goToView("settings")}
+                className="text-[10px] font-semibold text-zinc-400 hover:text-white mb-2 cursor-pointer"
+              >
+                &larr; Back to Settings
+              </button>
+              <h2 className="text-2xl font-bold text-white bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-400">
+                Getting a Slack Incoming Webhook URL
+              </h2>
+            </div>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-4 text-xs text-zinc-300 leading-relaxed">
+              <ol className="space-y-3 list-decimal list-inside">
+                <li>
+                  Go to{" "}
+                  <a href="https://api.slack.com/apps" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:text-emerald-300 font-mono">
+                    api.slack.com/apps
+                  </a>{" "}
+                  and sign in to the Slack workspace you want notifications in.
+                </li>
+                <li>Click <strong className="text-white">Create New App</strong> &rarr; <strong className="text-white">From scratch</strong>, give it a name, and pick your workspace.</li>
+                <li>In the app settings sidebar, click <strong className="text-white">Incoming Webhooks</strong>, then toggle it <strong className="text-white">On</strong>.</li>
+                <li>Click <strong className="text-white">Add New Webhook to Workspace</strong>, pick the channel you want drafts posted to, and authorize it.</li>
+                <li>Copy the generated URL, it looks like <span className="font-mono text-zinc-100 break-all">https://hooks.slack.com/services/T000/B000/xxxxxxxx</span>.</li>
+                <li>Paste it into the Slack Incoming Webhook URL field in Settings, it saves automatically. Click "Test Slack Connection" to confirm.</li>
+              </ol>
             </div>
           </div>
         )}
@@ -3337,6 +3747,8 @@ export default function Home() {
         <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] px-4 py-3 rounded-xl border backdrop-blur-xl shadow-2xl text-xs font-semibold max-w-md ${
           toast.tone === "error"
             ? "bg-rose-950/80 border-rose-500/30 text-rose-200"
+            : toast.tone === "info"
+            ? "bg-blue-950/80 border-blue-500/30 text-blue-200"
             : "bg-[#1a2b21]/90 border-[#4d8565]/40 text-[#9fd4b4]"
         }`}>
           {toast.text}

@@ -58,6 +58,24 @@ def clean_unicode_text(text: str) -> str:
     return text
 
 
+def normalize_linkedin_slug(url: str) -> str:
+    """
+    Reduces a LinkedIn profile URL to just its stable `/in/<slug>` identifier,
+    lowercased, with no scheme, "www.", trailing slash, or query string. Two
+    exports of the same profile taken months apart can differ in every one of
+    those (http vs https, a `?miniProfileUrn=...` tracking param LinkedIn
+    sometimes appends, a trailing slash), so comparing raw `profile_url`
+    strings for equality would miss real duplicates. Returns "" when no
+    `/in/<slug>` shape is found (e.g. a company page URL or empty input).
+    """
+    if not url:
+        return ""
+    match = re.search(r"linkedin\.com/in/([^/?#\s]+)", url, re.IGNORECASE)
+    if not match:
+        return ""
+    return match.group(1).strip().rstrip("/").lower()
+
+
 def parse_pdf_text(file_bytes: bytes) -> str:
     """Extracts raw text from a PDF file using pypdf and normalizes unicode."""
     try:
@@ -524,18 +542,105 @@ def extract_linkedin_profile_metadata(pdf_text: str) -> dict:
         metadata["connection_count"] = int(conn_match.group(1))
 
     # ---- Heuristically calculate experience years ----
+    # A raw sum of every "YYYY - YYYY" match over-counts: the same tenure often
+    # appears twice (a summary blurb plus the full Experience entry), and
+    # overlapping ranges (e.g. two promotions at one company, or concurrent
+    # roles) would each add their own years on top of each other. Merging
+    # intervals first, then summing only the merged (non-overlapping) spans,
+    # gives a realistic total instead of an inflated one.
     year_ranges = re.findall(r"(\b20\d{2}\b)\s*[-\u2013\u2014]\s*(\b20\d{2}\b|Present)", pdf_text, re.IGNORECASE)
-    total_years = 0.0
     current_year = datetime.date.today().year
 
+    intervals = []
     for start, end in year_ranges:
         start_yr = int(start)
         end_yr = current_year if end.lower() == "present" else int(end)
         diff = end_yr - start_yr
         if 0 < diff < 20:  # Sanity filter
-            total_years += diff
+            intervals.append((start_yr, end_yr))
+
+    total_years = 0.0
+    if intervals:
+        intervals.sort()
+        merged = [intervals[0]]
+        for start_yr, end_yr in intervals[1:]:
+            last_start, last_end = merged[-1]
+            if start_yr <= last_end:  # overlapping or duplicate, extend/merge
+                merged[-1] = (last_start, max(last_end, end_yr))
+            else:
+                merged.append((start_yr, end_yr))
+        total_years = sum(end_yr - start_yr for start_yr, end_yr in merged)
 
     if total_years > 0:
         metadata["years_experience"] = round(min(total_years, 35.0), 1)
 
     return metadata
+
+
+def extract_resume_contact_info(resume_text: str) -> dict:
+    """
+    Best-effort structured extraction (LinkedIn/GitHub/portfolio URLs, email,
+    phone, location) from résumé text, so the TwinAgent profile can auto-fill
+    the Social Links card instead of leaving the user to retype what's
+    already on their own resume. Reuses the same building blocks as
+    extract_linkedin_profile_metadata: URLs wrap across a line break in a PDF
+    export the same way regardless of whether the source is a LinkedIn
+    profile or a resume, so _rejoin_wrapped_urls runs first here too.
+    """
+    result = {
+        "github_url": None,
+        "portfolio_url": None,
+        "linkedin_url": None,
+        "email": None,
+        "phone": None,
+        "location": None,
+    }
+    if not resume_text:
+        return result
+
+    text = _rejoin_wrapped_urls(resume_text)
+
+    email_matches = re.findall(r'[\w.+-]+@[\w-]+\.[\w.-]+', text)
+    if email_matches:
+        result["email"] = email_matches[0].strip().rstrip('.,;')
+
+    linkedin_match = re.search(
+        r'(https?://[a-z0-9\-]+\.linkedin\.com/in/[^\s\n]+|linkedin\.com/in/[^\s\n]+)',
+        text, re.IGNORECASE
+    )
+    if linkedin_match:
+        url = re.sub(r'[\)\.\,\;\>]+$', '', linkedin_match.group(1).strip())
+        result["linkedin_url"] = url if url.startswith("http") else "https://" + url
+
+    github_match = re.search(
+        r'(https?://)?(www\.)?github\.com/[A-Za-z0-9_-]+', text, re.IGNORECASE
+    )
+    if github_match:
+        url = re.sub(r'[\)\.\,\;\>]+$', '', github_match.group(0).strip())
+        result["github_url"] = url if url.startswith("http") else "https://" + url
+
+    # Portfolio: first http(s) URL that isn't LinkedIn/GitHub and doesn't look
+    # like an email host. Genuinely best-effort, may be None.
+    for url_match in re.finditer(r'https?://[^\s\n]+', text, re.IGNORECASE):
+        url = re.sub(r'[\)\.\,\;\>]+$', '', url_match.group(0).strip())
+        lowered = url.lower()
+        if "linkedin.com" in lowered or "github.com" in lowered:
+            continue
+        result["portfolio_url"] = url
+        break
+
+    phone_match = re.search(
+        r'(\+\d{1,2}[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b', text
+    )
+    if phone_match:
+        result["phone"] = phone_match.group(0).strip()
+
+    # Location: best-effort scan of the header area (first ~10 non-empty
+    # lines), where a resume's city/state line typically sits near the name.
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    for line in lines[:10]:
+        if _looks_like_location(line):
+            result["location"] = line
+            break
+
+    return result
