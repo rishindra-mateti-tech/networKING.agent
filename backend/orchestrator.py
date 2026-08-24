@@ -368,7 +368,8 @@ class QueueOrchestrator:
                             candidate_name=connection.name,
                             candidate_profile=connection.profile_text or "",
                             candidate_posts=connection.posts_text or "",
-                            screenshot_path=connection.screenshot_path
+                            screenshot_path=connection.screenshot_path,
+                            posts_screenshot_path=connection.posts_screenshot_path
                         )
                         
                         # Sync manually specified hiring_badge_status if set, and backfill

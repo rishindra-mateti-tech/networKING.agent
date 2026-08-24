@@ -61,6 +61,8 @@ export default function Home() {
   const [newConnUrl, setNewConnUrl] = useState("");
   const [connPdfFiles, setConnPdfFiles] = useState<File[]>([]);
   const [connScreenshotFile, setConnScreenshotFile] = useState<File | null>(null);
+  const [connPostsImage, setConnPostsImage] = useState<File | null>(null);
+  const postsImageInputRef = useRef<HTMLInputElement>(null);
   const [connUploadLoading, setConnUploadLoading] = useState(false);
   const [customConnCount, setCustomConnCount] = useState<number | null>(null);
   const [customHiringStatus, setCustomHiringStatus] = useState<string>(""); // "" (auto), "ON" (yes), "OFF" (no)
@@ -649,7 +651,7 @@ export default function Home() {
     setConnUploadLoading(true);
     
     try {
-      if (connPdfFiles.length > 0 || connScreenshotFile || newConnUrl) {
+      if (connPdfFiles.length > 0 || connScreenshotFile || connPostsImage || newConnUrl) {
         // Multi-part creation (PDF/Screenshot/URL)
         const duplicateMessages: string[] = [];
         if (connPdfFiles.length > 0) {
@@ -657,6 +659,7 @@ export default function Home() {
             const formData = new FormData();
             formData.append("file", file);
             if (connScreenshotFile) formData.append("screenshot", connScreenshotFile);
+            if (connPostsImage) formData.append("posts_image", connPostsImage);
             if (newConnUrl) formData.append("profile_url", newConnUrl);
             if (newConnName) formData.append("name", newConnName);
             if (newConnTitle) formData.append("current_title", newConnTitle);
@@ -680,6 +683,7 @@ export default function Home() {
         } else {
           const formData = new FormData();
           if (connScreenshotFile) formData.append("screenshot", connScreenshotFile);
+          if (connPostsImage) formData.append("posts_image", connPostsImage);
           if (newConnUrl) formData.append("profile_url", newConnUrl);
           if (newConnName) formData.append("name", newConnName);
           if (newConnTitle) formData.append("current_title", newConnTitle);
@@ -713,6 +717,7 @@ export default function Home() {
         setShowAddModal(false);
         setConnPdfFiles([]);
         setConnScreenshotFile(null);
+        setConnPostsImage(null);
         setNewConnUrl("");
         setNewConnName("");
         setNewConnTitle("");
@@ -4088,14 +4093,46 @@ export default function Home() {
               </div>
 
               <div>
-                <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">Recent Posts Raw Text</label>
-                <textarea 
+                <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">Recent Posts (Optional)</label>
+                <textarea
                   value={newConnPosts}
                   onChange={e => setNewConnPosts(e.target.value)}
-                  placeholder="Paste raw text copy-paste of their last 3 to 5 original posts..."
+                  onPaste={e => {
+                    const item = [...e.clipboardData.items].find(i => i.type.startsWith("image/"));
+                    if (!item) return;
+                    const blob = item.getAsFile();
+                    if (blob) {
+                      setConnPostsImage(new File([blob], `pasted-post.${blob.type.split("/")[1] || "png"}`, { type: blob.type }));
+                    }
+                  }}
+                  placeholder="Paste raw text of their last 3 to 5 original posts, or paste a screenshot directly (Ctrl+V)..."
                   rows={3}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none"
                 />
+                <input
+                  type="file"
+                  accept="image/*"
+                  ref={postsImageInputRef}
+                  onChange={(e) => setConnPostsImage(e.target.files?.[0] || null)}
+                  className="hidden"
+                />
+                <div className="flex items-center gap-2 mt-2">
+                  {connPostsImage ? (
+                    <div className="text-xs text-emerald-400 font-mono flex items-center gap-2">
+                      <Check size={13} />
+                      <span className="line-clamp-1">{connPostsImage.name}</span>
+                      <button type="button" onClick={() => setConnPostsImage(null)} className="text-rose-500 hover:underline">Clear</button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => postsImageInputRef.current?.click()}
+                      className="text-[10px] font-semibold text-zinc-400 hover:text-white flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <ImagePlus size={12} /> Attach a post screenshot
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="flex justify-end items-center space-x-2 pt-2">

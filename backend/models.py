@@ -66,6 +66,7 @@ class Connection(Base):
     # URL & Screen Context
     profile_url = Column(String, nullable=True)
     screenshot_path = Column(String, nullable=True)
+    posts_screenshot_path = Column(String, nullable=True)  # optional screenshot of their recent posts, read alongside posts_text
 
     # Source file + contact details harvested from the PDF
     pdf_filename = Column(String, nullable=True)     # original uploaded filename

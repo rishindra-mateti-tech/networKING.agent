@@ -96,7 +96,7 @@ def validate_api_key(api_key: str) -> dict:
         return {"valid": False, "error": str(e)}
 
 
-def run_profile_intelligence_agent(api_key: str, name: str, profile_text: str, posts_text: str, screenshot_path: str = None) -> dict:
+def run_profile_intelligence_agent(api_key: str, name: str, profile_text: str, posts_text: str, screenshot_path: str = None, posts_screenshot_path: str = None) -> dict:
     """
     Agent 1: Profile Intelligence Agent
     Extracts name, role (title), seniority, company, follower count, connection count, education,
@@ -104,17 +104,19 @@ def run_profile_intelligence_agent(api_key: str, name: str, profile_text: str, p
     """
     system_instruction = (
         "You are a Profile Intelligence Agent. Your job is to extract detailed professional profile details "
-        "about a candidate from their LinkedIn PDF export and optional profile screenshot."
+        "about a candidate from their LinkedIn PDF export, optional profile screenshot, and optional screenshot "
+        "of their recent posts."
     )
 
     prompt = f"""
     Extract the following details from the LinkedIn profile of candidate: {name}.
-    
+
     PROFILE PDF TEXT:
     {profile_text or "No PDF text provided."}
-    
+
     RECENT POSTS TEXT:
     {posts_text or "No posts text provided."}
+    {"A screenshot of their recent posts is attached below the profile screenshot (if any). Read any text visible in it and factor it into recent_posts and tone." if posts_screenshot_path else ""}
     
     Analyze the profile text and optional screenshot (if provided) to return a JSON object with the following fields:
     - "name": Candidate's full name.
@@ -155,6 +157,13 @@ def run_profile_intelligence_agent(api_key: str, name: str, profile_text: str, p
             contents.append(img)
         except Exception as e:
             print(f"[PROFILE AGENT] Warning: Failed to load screenshot image: {e}")
+    if posts_screenshot_path and os.path.exists(posts_screenshot_path):
+        try:
+            import PIL.Image
+            img = PIL.Image.open(posts_screenshot_path)
+            contents.append(img)
+        except Exception as e:
+            print(f"[PROFILE AGENT] Warning: Failed to load posts screenshot image: {e}")
 
     try:
         raw_output = _call_gemini(api_key, system_instruction, contents, json_mode=True)
@@ -730,14 +739,14 @@ def run_message_writing_agent(
         raise e
 
 
-def analyze_candidate_bridge(api_key: str, twin_profile: str, candidate_name: str, candidate_profile: str, candidate_posts: str, screenshot_path: str = None) -> dict:
+def analyze_candidate_bridge(api_key: str, twin_profile: str, candidate_name: str, candidate_profile: str, candidate_posts: str, screenshot_path: str = None, posts_screenshot_path: str = None) -> dict:
     """
     Stage 1: Multi-Agent Analysis Pipeline.
     Runs Profile Agent, Company Agent, Relationship Strategy Agent, Personalization Agent, and Context Synthesizer.
     Returns a unified dict containing structured JSONs, metrics, and retro-compatible keys.
     """
     # 1. Profile Intelligence
-    profile_intel = run_profile_intelligence_agent(api_key, candidate_name, candidate_profile, candidate_posts, screenshot_path)
+    profile_intel = run_profile_intelligence_agent(api_key, candidate_name, candidate_profile, candidate_posts, screenshot_path, posts_screenshot_path)
     
     # 2. Company Intelligence
     company_intel = run_company_intelligence_agent(api_key, profile_intel)

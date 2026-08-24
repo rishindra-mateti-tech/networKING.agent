@@ -567,6 +567,7 @@ def _find_duplicate_connection(db: Session, user_id: int, profile_url: Optional[
 async def upload_linkedin_profile(
     file: Optional[UploadFile] = File(None),
     screenshot: Optional[UploadFile] = File(None),
+    posts_image: Optional[UploadFile] = File(None),
     posts: Optional[str] = Form(None),
     profile_url: Optional[str] = Form(None),
     name: Optional[str] = Form(None),
@@ -619,6 +620,20 @@ async def upload_linkedin_profile(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to save screenshot: {str(e)}")
 
+    posts_screenshot_path = None
+    if posts_image:
+        import uuid
+        ext = os.path.splitext(posts_image.filename)[1] or ".png"
+        filename = f"{uuid.uuid4()}{ext}"
+        filepath = os.path.join(UPLOADS_DIR, filename)
+        try:
+            with open(filepath, "wb") as f:
+                content = await posts_image.read()
+                f.write(content)
+            posts_screenshot_path = filepath
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to save posts screenshot: {str(e)}")
+
     if not name:
         raise HTTPException(status_code=400, detail="Candidate Name is required.")
 
@@ -634,6 +649,11 @@ async def upload_linkedin_profile(
                 os.remove(existing.screenshot_path)
             except OSError as e:
                 print(f"[UPLOAD] Failed to remove stale screenshot {existing.screenshot_path}: {e}")
+        if posts_screenshot_path and existing.posts_screenshot_path and os.path.exists(existing.posts_screenshot_path):
+            try:
+                os.remove(existing.posts_screenshot_path)
+            except OSError as e:
+                print(f"[UPLOAD] Failed to remove stale posts screenshot {existing.posts_screenshot_path}: {e}")
 
         existing.name = name
         existing.current_title = current_title or existing.current_title
@@ -651,6 +671,8 @@ async def upload_linkedin_profile(
             existing.profile_url = profile_url
         if screenshot_path:
             existing.screenshot_path = screenshot_path
+        if posts_screenshot_path:
+            existing.posts_screenshot_path = posts_screenshot_path
         if hiring_badge_status:
             existing.hiring_badge_status = hiring_badge_status
         if pdf_filename:
@@ -692,6 +714,7 @@ async def upload_linkedin_profile(
         posts_text=posts,
         profile_url=profile_url,
         screenshot_path=screenshot_path,
+        posts_screenshot_path=posts_screenshot_path,
         status="pending",
         is_starred=False,
         hiring_badge_status=hiring_badge_status,

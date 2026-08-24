@@ -76,7 +76,8 @@ class ConnectionOut(BaseModel):
     profile_url: Optional[str] = None
 
     screenshot_path: Optional[str] = None
-    
+    posts_screenshot_path: Optional[str] = None
+
     networking_score: Optional[float] = None
     reply_probability: Optional[float] = None
     hiring_probability_score: Optional[str] = None
