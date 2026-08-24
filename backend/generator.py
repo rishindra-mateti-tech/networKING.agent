@@ -498,11 +498,13 @@ def run_message_writing_agent(
     context_summary: str,
     twin_profile: str,
     tone_examples: str,
+    sender_name: str = "the user",
 ) -> dict:
     """
     Agent 5: Message Writing Agent
     Takes reasoning JSONs and the reasoning context summary, plus twin profile and tone guidelines.
-    Writes exactly 5 objective-specific outreach message drafts in the voice of the user (Rishindra).
+    Writes exactly 5 objective-specific outreach message drafts in the voice of the user (sender_name,
+    the currently signed-in account -- this app is multi-tenant, so this must never be hardcoded).
     Fills in the candidate's actual name and company instead of outputting placeholders like [Name].
     No conversational clichés are allowed. Follows explicit strategy guidelines.
     """
@@ -512,9 +514,9 @@ def run_message_writing_agent(
     system_instruction = (
         "You are a Message Writing Agent. Your ONLY job is to draft outreach messages. "
         "You have NO reasoning responsibility. Follow the decided strategy, dos, donts, and context summary strictly. "
-        "Write in the voice of the user (Rishindra). You must substitute actual candidate details (name, company) "
+        f"Write in the voice of the user ({sender_name}). You must substitute actual candidate details (name, company) "
         "and never output bracketed placeholders like [Name] or [Company]. "
-        "Rishindra's voice is highly polite, humble, requesting, and professional. Always acknowledge that their "
+        f"{sender_name}'s voice is highly polite, humble, requesting, and professional. Always acknowledge that their "
         "time is valuable, use phrases like 'no pressure', and ask if they can share their insights, guidance, or perspective.\n\n"
         "HOW TO SOUND LIKE AN ACTUAL PERSON, NOT A MODEL:\n"
         "- Never use an em dash (—) or en dash (–) anywhere, for any reason. If you're tempted to use one to join two "
@@ -540,7 +542,7 @@ def run_message_writing_agent(
     )
 
     prompt = f"""
-    USER DETAILS (RISHINDRA):
+    USER DETAILS ({sender_name}):
     {twin_profile}
     
     TONE EXAMPLES / GUIDELINES:
@@ -569,11 +571,11 @@ def run_message_writing_agent(
     - Conversation Starter: {personalization_json.get("conversation_starter")}
     - Things to Avoid: {personalization_json.get("avoid_points")}
     
-    Write exactly 5 message variants in the voice of Rishindra following these instructions:
+    Write exactly 5 message variants in the voice of {sender_name} following these instructions:
     - Do not do any reasoning. Just output the drafts.
     - Strictly respect all DONTs and Things to Avoid.
     - Write short messages (usually 2 to 5 sentences) for variants 1-4.
-    - Write a longer, natural message for variant 5 (Featured Draft) without word count restrictions, modeled after Rishindra's templates.
+    - Write a longer, natural message for variant 5 (Featured Draft) without word count restrictions, modeled after the templates below.
     - **CRITICAL**: Fill in actual candidate details. Substitute '[Name]' with '{candidate_name}' and '[Company]' with '{candidate_company}' directly in the drafts. Do NOT output bracketed placeholders like '[Name]' or '[Company]'.
     - **TONE RULE**: Make the drafts sound polite, humble, and requesting. You MUST include phrases like: 'I know your time is valuable, so there is absolutely no pressure', 'I would be incredibly grateful for any advice you could share', 'I would truly value your perspective', or 'If you ever have a few spare minutes to share your insights, I'd genuinely appreciate it'.
     - CRITICAL NEGATIVE CONSTRAINT: Never use an em dash (—) or en dash (–). Ban all AI clichés: "Hope this finds you well", "Hope you are doing well", "I was impressed by your profile", "Quick chat", "15-minute coffee chat", "delve", "leverage", "synergy", "unlock", "game-changer", "passionate about", "reaching out because", "pick your brain", "thought leader", "excited to connect", "would love to connect", "in today's fast-paced world", "navigate the landscape of", "incredible work", "truly inspiring", "Looking forward to hearing from you!", "Thanks in advance!".
@@ -581,19 +583,19 @@ def run_message_writing_agent(
     
     FEW-SHOT TONE REFERENCE TEMPLATES (STRUCTURE AND TONE ONLY, NOT FACTS):
     These four examples exist to show sentence rhythm, warmth, and the "no pressure" pattern. They are
-    NOT a source of truth about who the sender is. The bracketed [role/status] in each one stands in for
-    whatever the USER DETAILS (RISHINDRA) section above actually says about their CURRENT JOB OR SCHOOL
-    STANDING right now (e.g. "a software engineer" / "recently completed my Master's in CS"), and it
-    changes over time as that profile is updated. If USER DETAILS says the sender has graduated or holds
-    a different role than what these examples imply, use that, never the literal wording below.
+    NOT a source of truth about who the sender is, what they do, where they studied, or what company
+    they work at -- every bracketed placeholder below must be filled from the actual USER DETAILS
+    ({sender_name}) section above, which is different for every account using this app. Never reuse the
+    illustrative examples inside the brackets (a specific school, a specific employer) as if they were
+    real; they are only there to show the shape of what belongs in that spot.
     * Referral / Opportunity Inquiry:
-      "Hi {candidate_name}, I'm Rishindra, [role/status from USER DETAILS, e.g. an AI Engineer Intern at ZUZU.AI], where I build RAG pipelines and FastAPI backends. I saw that your team at {candidate_company} focuses on shipping fast, which caught my attention. With my background in backend engineering and building AI tools like CodeStory, I'm curious if your team is currently looking for additional engineering support. I know your time is valuable, so there is absolutely no pressure, but I would be grateful to connect and learn more about what you're building."
+      "Hi {candidate_name}, I'm {sender_name}, [role/status from USER DETAILS, e.g. a software engineer at [their actual company]], where I [what they actually work on, from USER DETAILS]. I saw that your team at {candidate_company} focuses on shipping fast, which caught my attention. With my background in [their actual relevant background], I'm curious if your team is currently looking for additional engineering support. I know your time is valuable, so there is absolutely no pressure, but I would be grateful to connect and learn more about what you're building."
 
     * Low-Pressure Career Advice Request (Connection Accepted Follow-up):
       "Hi {candidate_name}, thanks for connecting. [role/status from USER DETAILS, one sentence]. I spent some time going through your profile, and I was genuinely impressed by your journey at {candidate_company}. I'm trying to learn from developers who have successfully navigated this path. If you ever have a few spare minutes, I'd be incredibly grateful for any advice or insights you could share on what skills are critical for your team. I know your time is valuable, so there is absolutely no pressure at all."
 
-    * Alumni / Common Ground Builder:
-      "Fellow Wright State Builder 👋 Hi {candidate_name}, fellow Wright State alum here. I came across your profile while learning about {candidate_company} and really enjoyed seeing how you approached building resilient engineering teams. [role/status from USER DETAILS, one sentence]. If you ever have a spare moment to share your perspective on how you made that transition, I would truly value your guidance. No pressure at all."
+    * Alumni / Common Ground Builder (ONLY use this angle if USER DETAILS actually names a shared school/employer with the candidate -- never invent one):
+      "Fellow [their actual school] Builder 👋 Hi {candidate_name}, fellow [their actual school] alum here. I came across your profile while learning about {candidate_company} and really enjoyed seeing how you approached building resilient engineering teams. [role/status from USER DETAILS, one sentence]. If you ever have a spare moment to share your perspective on how you made that transition, I would truly value your guidance. No pressure at all."
 
     * Recruiter / TA Specialist Advice Request:
       "Hi {candidate_name}, Thank you for connecting. [role/status from USER DETAILS, one sentence]. I know you support technical recruiting at {candidate_company}, so I wanted to ask very humbly, what would you recommend I focus on to become a stronger candidate? I know your time is valuable, so even a single line of advice would be something I'd be incredibly grateful for."
@@ -662,19 +664,23 @@ def run_message_writing_agent(
         def clean_placeholders(text: str) -> str:
             if not text:
                 return text
-            # Replace bracketed candidate placeholders
+            # Replace bracketed candidate placeholders. The sender-side
+            # fallbacks are deliberately generic (not a hardcoded name/company
+            # from whoever built this app) since this is multi-tenant -- they
+            # should essentially never fire given the instructions above, but
+            # if the model slips, "my current company" reads fine for anyone.
             text = re.sub(r'\[\s*(Candidate\s*)?Name\s*\]', candidate_name, text, flags=re.IGNORECASE)
             text = re.sub(r'\[\s*(Candidate\s*)?Company\s*\]', candidate_company, text, flags=re.IGNORECASE)
-            text = re.sub(r'\[\s*Your\s*Name\s*\]', "Rishindra", text, flags=re.IGNORECASE)
-            text = re.sub(r'\[\s*Your\s*Company\s*\]', "ZUZU.AI", text, flags=re.IGNORECASE)
-            
+            text = re.sub(r'\[\s*Your\s*Name\s*\]', sender_name, text, flags=re.IGNORECASE)
+            text = re.sub(r'\[\s*Your\s*Company\s*\]', "my current company", text, flags=re.IGNORECASE)
+
             # Direct text replaces
             text = text.replace("[Name]", candidate_name)
             text = text.replace("[Company]", candidate_company)
-            text = text.replace("[Your Name]", "Rishindra")
-            text = text.replace("[Your Company]", "ZUZU.AI")
-            text = text.replace("[Role Name]", "Software Engineer")
-            text = text.replace("[Role]", "Software Engineer")
+            text = text.replace("[Your Name]", sender_name)
+            text = text.replace("[Your Company]", "my current company")
+            text = text.replace("[Role Name]", "my role")
+            text = text.replace("[Role]", "my role")
             return text
 
         if ref_match:
@@ -754,7 +760,7 @@ def analyze_candidate_bridge(api_key: str, twin_profile: str, candidate_name: st
     }
 
 
-def generate_outreach_variants(api_key: str, twin_profile: str, candidate_name: str, candidate_profile: str, candidate_posts: str, bridge_data: dict, tone_examples: str = "") -> dict:
+def generate_outreach_variants(api_key: str, twin_profile: str, candidate_name: str, candidate_profile: str, candidate_posts: str, bridge_data: dict, tone_examples: str = "", sender_name: str = "the user") -> dict:
     """
     Stage 2: Message Writing Agent.
     Runs the writing agent using synthesized intermediate outputs.
@@ -775,16 +781,17 @@ def generate_outreach_variants(api_key: str, twin_profile: str, candidate_name: 
         context_summary=context_summary,
         twin_profile=twin_profile,
         tone_examples=tone_examples,
+        sender_name=sender_name,
     )
 
 
-def generate_thread_followup(api_key: str, twin_profile: str, candidate_profile: str, thread_history: list, user_intent: str = None) -> str:
+def generate_thread_followup(api_key: str, twin_profile: str, candidate_profile: str, thread_history: list, user_intent: str = None, sender_name: str = "the user") -> str:
     """
     Generates a follow-up reply in an ongoing chat thread context.
     thread_history is a list of dicts: [{"sender": "user"|"connection", "message": "..."}]
     """
     system_instruction = (
-        "You are Rishindra's LinkedIn message assistant. You are drafting a follow-up message in an ongoing "
+        f"You are {sender_name}'s LinkedIn message assistant. You are drafting a follow-up message in an ongoing "
         "conversation thread. You write naturally, concisely, and with low pressure, like a real person continuing "
         "a real conversation, not a template. Never use an em dash or en dash. Never use AI-cliche phrasing "
         "('delve', 'leverage', 'excited to connect', 'hope this finds you well', 'circle back', 'touch base'). "
@@ -794,11 +801,11 @@ def generate_thread_followup(api_key: str, twin_profile: str, candidate_profile:
     # Format thread history
     history_str = ""
     for msg in thread_history:
-        sender_label = "Rishindra (You)" if msg["sender"] == "user" else "Connection"
+        sender_label = f"{sender_name} (You)" if msg["sender"] == "user" else "Connection"
         history_str += f"{sender_label}: {msg['message']}\n"
 
     prompt = f"""
-    RISHINDRA (USER) PROFILE:
+    {sender_name.upper()} (USER) PROFILE:
     {twin_profile}
     
     CANDIDATE PROFILE CONTEXT:
@@ -833,6 +840,7 @@ def generate_outreach_email(
     candidate_profile: str,
     bridge_data: dict,
     tone_examples: str = "",
+    sender_name: str = "the user",
 ) -> dict:
     """
     Writes a real outreach EMAIL (subject + body), distinct from the short-form
@@ -941,8 +949,8 @@ def generate_outreach_email(
 
         "WEAK, because it leads with the sender and could be sent to anyone:\n"
         "  Subject: building developer tools at console\n"
-        "  'Hi Adithya, I'm Rishindra, [whatever the sender's current status actually is] and a software "
-        "engineer building full-stack AI systems at ZUZU.AI. I noticed your work spanning native iOS and web "
+        f"  'Hi Adithya, I'm {sender_name}, [whatever the sender's current status actually is] and a software "
+        "engineer building full-stack AI systems at [their actual company]. I noticed your work spanning native iOS and web "
         "frameworks like React and Vue while building developer tools at Console...'\n"
         "  Why it fails: the first fourteen words are about the sender. The observation is a list of "
         "technologies scraped from a profile, not a thought. Nothing here is unanswerable, so nothing "
@@ -1085,7 +1093,7 @@ def chat_about_twin_profile(api_key: str, twin_profile: str, history: list, mess
         "Return ONLY raw JSON with these fields:\n"
         '  "reply": what you say back to them\n'
         '  "learned": a durable, self-contained fact worth remembering permanently, written in third '
-        'person (e.g. "Led the retrieval pipeline rewrite at ZUZU.AI, owning it end to end"). '
+        'person (e.g. "Led the retrieval pipeline rewrite at their company, owning it end to end"). '
         'Use an empty string when the message carried nothing new worth keeping, such as a greeting '
         'or a question directed at you.'
     )
@@ -1157,6 +1165,7 @@ def analyze_conversation_screenshot(
     candidate_name: str,
     screenshot_path: str,
     thread_history: Optional[list] = None,
+    sender_name: str = "the user",
 ) -> dict:
     """
     Reads a screenshot of a LinkedIn conversation and judges how it's actually
@@ -1176,7 +1185,7 @@ def analyze_conversation_screenshot(
     history_str = ""
     if thread_history:
         for msg in thread_history:
-            sender_label = "Rishindra (sent)" if msg.get("sender") == "user" else "Them (received)"
+            sender_label = f"{sender_name} (sent)" if msg.get("sender") == "user" else "Them (received)"
             history_str += f"{sender_label}: {msg.get('message', '')}\n"
 
     prompt = f"""

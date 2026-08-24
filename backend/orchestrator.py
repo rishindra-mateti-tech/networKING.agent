@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 import models
 from database import SessionLocal
-from twin_agent import compile_twin_agent_profile
+from twin_agent import compile_twin_agent_profile, get_sender_name
 from generator import analyze_candidate_bridge, generate_outreach_variants
 
 class QueueOrchestrator:
@@ -348,6 +348,7 @@ class QueueOrchestrator:
                     pacing_min = 15.0
 
                 twin_profile = compile_twin_agent_profile(db, user_id)
+                sender_name = get_sender_name(db, user_id)
 
                 # 4. Generate with Failover Pool Retry
                 success = False
@@ -403,7 +404,8 @@ class QueueOrchestrator:
                             candidate_profile=connection.profile_text or "",
                             candidate_posts=connection.posts_text or "",
                             bridge_data=bridge_data,
-                            tone_examples=settings.get("tone_examples", "")
+                            tone_examples=settings.get("tone_examples", ""),
+                            sender_name=sender_name
                         )
                         
                         # Save successful outreach

@@ -28,7 +28,7 @@ from generator import (
     generate_twin_understanding,
     chat_about_twin_profile,
 )
-from twin_agent import compile_twin_agent_profile
+from twin_agent import compile_twin_agent_profile, get_sender_name
 
 from migrate import run_migrations
 from config import CORS_ORIGINS
@@ -148,7 +148,7 @@ def register(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
         "job_search_status", "target_roles", "learning_goals", "tone_examples",
         "email_client_preference", "twin_understanding", "twin_extra_notes",
         "resume_filename", "contact_email", "contact_phone", "resume_location",
-        "custom_links", "tone_presets"
+        "custom_links", "tone_presets", "full_name"
     ]
     for key in basic_keys:
         default_val = "15" if key == "pacing_interval_minutes" else ""
@@ -251,6 +251,7 @@ async def upload_resume(file: UploadFile = File(...), current_user: models.User 
         "contact_email": extracted.get("email"),
         "contact_phone": extracted.get("phone"),
         "resume_location": extracted.get("location"),
+        "full_name": extracted.get("full_name"),
     }
     for key, value in fill_only_if_empty.items():
         if value and not (existing_settings.get(key) or "").strip():
@@ -868,7 +869,8 @@ async def upload_conversation_screenshot(
         api_key=api_key_record.key_value,
         candidate_name=conn.name,
         screenshot_path=filepath,
-        thread_history=thread_history
+        thread_history=thread_history,
+        sender_name=get_sender_name(db, current_user.id)
     )
     conn.conversation_verdict = analysis["verdict"]
     conn.conversation_verdict_reason = analysis["reason"]
@@ -934,7 +936,8 @@ def generate_followup_suggestion(
         twin_profile=twin_profile,
         candidate_profile=conn.profile_text or "",
         thread_history=thread_history,
-        user_intent=user_intent
+        user_intent=user_intent,
+        sender_name=get_sender_name(db, current_user.id)
     )
 
     return {"suggested_reply": reply_text}
@@ -1140,6 +1143,7 @@ def generate_email_draft(
             "context_summary": conn.context_summary,
         },
         tone_examples=settings.get("tone_examples", ""),
+        sender_name=get_sender_name(db, current_user.id),
     )
 
     conn.generated_email_subject = result["subject"]

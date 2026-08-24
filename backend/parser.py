@@ -609,6 +609,7 @@ def extract_resume_contact_info(resume_text: str) -> dict:
         "email": None,
         "phone": None,
         "location": None,
+        "full_name": None,
     }
     if not resume_text:
         return result
@@ -715,6 +716,13 @@ def extract_resume_contact_info(resume_text: str) -> dict:
     for line in lines[:10]:
         if _looks_like_location(line):
             result["location"] = line
+            break
+
+    # Full name: almost always the very first substantial line of a resume.
+    # Reuses the same name-shape heuristic already trusted for LinkedIn PDFs.
+    for line in lines[:5]:
+        if _looks_like_person_name(line):
+            result["full_name"] = line
             break
 
     return result
