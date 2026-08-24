@@ -528,16 +528,20 @@ class QueueOrchestrator:
                                             f"🎯 <b>Best Message Type</b>: {best_message_type}"
                                         ),
                                     ]
+                                    # The Featured draft has no length cap and is almost always what
+                                    # pushes the whole briefing over Telegram's 4096-char hard limit,
+                                    # forcing a split into multiple messages. Leaving it out of the
+                                    # notification (it's already sitting in the dashboard) keeps this
+                                    # to one message the vast majority of the time.
                                     for label, body in [
                                         ("REFERRAL DRAFT", safe_referral),
                                         ("COFFEE CHAT DRAFT", safe_coffee),
                                         ("TECHNICAL DRAFT", safe_technical),
                                         ("RELATIONSHIP BUILDING DRAFT", safe_relationship),
-                                        ("FEATURED OUTREACH DRAFT", safe_featured),
                                     ]:
                                         if body:
                                             telegram_blocks.append(f"📝 <b>{label}</b>\n<code>{body}</code>")
-                                    telegram_blocks.append("<i>Review, select &amp; copy from your networKING dashboard.</i>")
+                                    telegram_blocks.append("<i>Review, select &amp; copy from your networKING dashboard (the Featured draft is there too).</i>")
 
                                     await self._send_telegram_alert(
                                         telegram_token, telegram_chat_id, blocks=telegram_blocks

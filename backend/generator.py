@@ -581,27 +581,36 @@ def run_message_writing_agent(
     
     FEW-SHOT TONE REFERENCE TEMPLATES (STRUCTURE AND TONE ONLY, NOT FACTS):
     These four examples exist to show sentence rhythm, warmth, and the "no pressure" pattern. They are
-    NOT a source of truth about who the sender is. The bracketed [current status] in each one stands in
-    for whatever the USER DETAILS (RISHINDRA) section above actually says right now, current job, visa
-    status, school status, or anything else, and it changes over time as that profile is updated. If
-    USER DETAILS says the sender has graduated, is on OPT, or has a different job than what these
-    examples imply, use THAT, never the literal wording below.
+    NOT a source of truth about who the sender is. The bracketed [role/status] in each one stands in for
+    whatever the USER DETAILS (RISHINDRA) section above actually says about their CURRENT JOB OR SCHOOL
+    STANDING right now (e.g. "a software engineer" / "recently completed my Master's in CS"), and it
+    changes over time as that profile is updated. If USER DETAILS says the sender has graduated or holds
+    a different role than what these examples imply, use that, never the literal wording below.
     * Referral / Opportunity Inquiry:
-      "Hi {candidate_name}, I'm Rishindra, [current status from USER DETAILS, e.g. an AI Engineer Intern at ZUZU.AI], where I build RAG pipelines and FastAPI backends. I saw that your team at {candidate_company} focuses on shipping fast, which caught my attention. With my background in backend engineering and building AI tools like CodeStory, I'm curious if your team is currently looking for additional engineering support. I know your time is valuable, so there is absolutely no pressure, but I would be grateful to connect and learn more about what you're building."
+      "Hi {candidate_name}, I'm Rishindra, [role/status from USER DETAILS, e.g. an AI Engineer Intern at ZUZU.AI], where I build RAG pipelines and FastAPI backends. I saw that your team at {candidate_company} focuses on shipping fast, which caught my attention. With my background in backend engineering and building AI tools like CodeStory, I'm curious if your team is currently looking for additional engineering support. I know your time is valuable, so there is absolutely no pressure, but I would be grateful to connect and learn more about what you're building."
 
     * Low-Pressure Career Advice Request (Connection Accepted Follow-up):
-      "Hi {candidate_name}, thanks for connecting. [current status from USER DETAILS, one sentence]. I spent some time going through your profile, and I was genuinely impressed by your journey at {candidate_company}. I'm trying to learn from developers who have successfully navigated this path. If you ever have a few spare minutes, I'd be incredibly grateful for any advice or insights you could share on what skills are critical for your team. I know your time is valuable, so there is absolutely no pressure at all."
+      "Hi {candidate_name}, thanks for connecting. [role/status from USER DETAILS, one sentence]. I spent some time going through your profile, and I was genuinely impressed by your journey at {candidate_company}. I'm trying to learn from developers who have successfully navigated this path. If you ever have a few spare minutes, I'd be incredibly grateful for any advice or insights you could share on what skills are critical for your team. I know your time is valuable, so there is absolutely no pressure at all."
 
     * Alumni / Common Ground Builder:
-      "Fellow Wright State Builder 👋 Hi {candidate_name}, fellow Wright State alum here. I came across your profile while learning about {candidate_company} and really enjoyed seeing how you approached building resilient engineering teams. [current status from USER DETAILS, one sentence]. If you ever have a spare moment to share your perspective on how you made that transition, I would truly value your guidance. No pressure at all."
+      "Fellow Wright State Builder 👋 Hi {candidate_name}, fellow Wright State alum here. I came across your profile while learning about {candidate_company} and really enjoyed seeing how you approached building resilient engineering teams. [role/status from USER DETAILS, one sentence]. If you ever have a spare moment to share your perspective on how you made that transition, I would truly value your guidance. No pressure at all."
 
     * Recruiter / TA Specialist Advice Request:
-      "Hi {candidate_name}, Thank you for connecting. [current status from USER DETAILS, one sentence, e.g. work authorization or current role, whichever is more relevant to a recruiter]. I know you support technical recruiting at {candidate_company}, so I wanted to ask very humbly, what would you recommend I focus on to become a stronger candidate? I know your time is valuable, so even a single line of advice would be something I'd be incredibly grateful for."
+      "Hi {candidate_name}, Thank you for connecting. [role/status from USER DETAILS, one sentence]. I know you support technical recruiting at {candidate_company}, so I wanted to ask very humbly, what would you recommend I focus on to become a stronger candidate? I know your time is valuable, so even a single line of advice would be something I'd be incredibly grateful for."
 
-    Before writing, check the USER DETAILS section above for the sender's actual current status (job,
-    school, work authorization) and use that exact reality in every draft. Never say "currently
-    pursuing" or "student" if USER DETAILS indicates they have already graduated or hold a different
-    status now.
+    Before writing, check the USER DETAILS section above for the sender's actual current job/school
+    status and use that exact reality in every draft. Never say "currently pursuing" or "student" if
+    USER DETAILS indicates they have already graduated or hold a different status now.
+
+    NEVER STATE VISA OR WORK-AUTHORIZATION STATUS UNPROMPTED: whether the sender is on OPT, CPT, H1B,
+    needs sponsorship, or anything else in that category is background context ONLY, used to judge what
+    kind of ask is appropriate (e.g. it's fine to ask about openings when actively job searching), never
+    something to volunteer as a stated fact in the message itself. A cold first message is not the place
+    to disclose immigration status, and the recipient did not ask. Only mention it if the draft is
+    explicitly and specifically about work authorization/sponsorship (rare, and only when the strategy
+    above calls for it directly). "I'm a software engineer" or "I recently graduated with a Master's in
+    CS" is the right level of detail; "I'm on OPT" in an unrelated referral/coffee-chat/technical/
+    relationship draft is not.
 
     Please generate EXACTLY 5 message variants:
     1. Referral Draft (Focuses on job opportunity referral or learning about open opportunities in their team/company)
@@ -920,7 +929,10 @@ def generate_outreach_email(
         "- Never claim to have used their product, read their paper, or attended their talk unless the provided "
         "context explicitly says so.\n"
         "- If the research context is thin, write a shorter, plainer email. A short honest email beats a long "
-        "email padded with invented familiarity.\n\n"
+        "email padded with invented familiarity.\n"
+        "- Never state visa or work-authorization status (OPT, CPT, H1B, needs sponsorship, etc.) unless the "
+        "email is explicitly and specifically about sponsorship. It's background context for judging what ask "
+        "is appropriate, not something to volunteer in a cold email the recipient didn't ask about.\n\n"
 
         "CALIBRATION, showing the difference the opening line makes. The sender's status in these two "
         "examples ('a CS Master's student') is illustrative only, it is NOT what to write. Always pull the "
