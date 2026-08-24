@@ -76,6 +76,7 @@ export default function Home() {
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [resumeUploadLoading, setResumeUploadLoading] = useState(false);
   const [resumeFilename, setResumeFilename] = useState("");
+  const [fullName, setFullName] = useState("");
 
   // Becomes true only after the initial GET /api/settings load finishes, so
   // the autosave hooks below don't fire on the values fetchSettings itself
@@ -373,6 +374,7 @@ export default function Home() {
         setTwinExtraNotes(mapped["twin_extra_notes"] || "");
         setPacingInterval(mapped["pacing_interval_minutes"] || "15");
         setResumeFilename(mapped["resume_filename"] || "");
+        setFullName(mapped["full_name"] || "");
         setGithubUrl(mapped["github_url"] || "");
         setPortfolioUrl(mapped["portfolio_url"] || "");
         setLinkedinUrl(mapped["linkedin_url"] || "");
@@ -422,6 +424,7 @@ export default function Home() {
   useDebouncedSave(latexCode, (v) => saveSetting("resume_latex", v), settingsLoaded);
   useDebouncedSave(twinUnderstanding, (v) => saveSetting("twin_understanding", v), settingsLoaded);
   useDebouncedSave(twinExtraNotes, (v) => saveSetting("twin_extra_notes", v), settingsLoaded);
+  useDebouncedSave(fullName, (v) => saveSetting("full_name", v), settingsLoaded);
   useDebouncedSave(githubUrl, (v) => saveSetting("github_url", v), settingsLoaded);
   useDebouncedSave(portfolioUrl, (v) => saveSetting("portfolio_url", v), settingsLoaded);
   useDebouncedSave(linkedinUrl, (v) => saveSetting("linkedin_url", v), settingsLoaded);
@@ -1879,6 +1882,23 @@ export default function Home() {
               <p className="text-xs text-zinc-400 mt-1">
                 Compile your professional details, LaTeX source code, and target profiles. TwinAgent feeds this directly to generation workers.
               </p>
+            </div>
+
+            {/* Full Name -- the single most load-bearing fact here: every draft
+                is written and signed in this name. Auto-filled from your resume,
+                always editable. */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+              <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">Your Full Name</label>
+              <p className="text-xs text-zinc-400 mb-3">
+                Drafts are written and signed in this name. Auto-detected from your resume when you upload one.
+              </p>
+              <input
+                type="text"
+                value={fullName}
+                onChange={e => setFullName(e.target.value)}
+                placeholder="e.g. Jordan Rivera"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-zinc-700"
+              />
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -3896,46 +3916,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Profile URL Input */}
-              <div>
-                <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">LinkedIn Profile URL</label>
-                <input 
-                  type="url" 
-                  value={newConnUrl}
-                  onChange={e => setNewConnUrl(e.target.value)}
-                  placeholder="e.g. https://www.linkedin.com/in/username"
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-zinc-700"
-                />
-              </div>
-
-              {/* Profile Screenshot Input */}
-              <div className="border border-dashed border-zinc-800 rounded-lg p-4 text-center bg-zinc-950/40 relative">
-                <span className="text-xs text-zinc-400 block mb-2">Upload Profile Screenshot (Optional)</span>
-                <input 
-                  type="file" 
-                  accept="image/*"
-                  ref={screenshotInputRef}
-                  onChange={(e) => setConnScreenshotFile(e.target.files?.[0] || null)}
-                  className="hidden"
-                />
-                {connScreenshotFile ? (
-                  <div className="text-xs text-emerald-400 font-mono flex items-center justify-center space-x-2">
-                    <Check size={14} />
-                    <span className="line-clamp-1">{connScreenshotFile.name}</span>
-                    <button type="button" onClick={() => setConnScreenshotFile(null)} className="text-rose-500 hover:underline">Clear</button>
-                  </div>
-                ) : (
-                  <button 
-                    type="button"
-                    onClick={() => screenshotInputRef.current?.click()}
-                    className="text-xs bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 px-3 py-1.5 rounded text-zinc-300 hover:text-white transition-colors cursor-pointer"
-                  >
-                    Select Screenshot Image
-                  </button>
-                )}
-                <span className="text-[9px] text-zinc-500 mt-1 block">Supports PNG, JPG, JPEG</span>
-              </div>
-
               <div className="border border-zinc-800 rounded-lg overflow-hidden">
                 <button
                   type="button"
@@ -3947,7 +3927,48 @@ export default function Home() {
                 </button>
 
                 {showManualFields && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-3 pt-1 border-t border-zinc-800">
+                  <div className="space-y-4 p-3 pt-1 border-t border-zinc-800">
+                    {/* Profile URL Input */}
+                    <div>
+                      <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">LinkedIn Profile URL</label>
+                      <input
+                        type="url"
+                        value={newConnUrl}
+                        onChange={e => setNewConnUrl(e.target.value)}
+                        placeholder="e.g. https://www.linkedin.com/in/username"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-zinc-700"
+                      />
+                    </div>
+
+                    {/* Profile Screenshot Input */}
+                    <div className="border border-dashed border-zinc-800 rounded-lg p-4 text-center bg-zinc-950/40 relative">
+                      <span className="text-xs text-zinc-400 block mb-2">Upload Profile Screenshot (Optional)</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        ref={screenshotInputRef}
+                        onChange={(e) => setConnScreenshotFile(e.target.files?.[0] || null)}
+                        className="hidden"
+                      />
+                      {connScreenshotFile ? (
+                        <div className="text-xs text-emerald-400 font-mono flex items-center justify-center space-x-2">
+                          <Check size={14} />
+                          <span className="line-clamp-1">{connScreenshotFile.name}</span>
+                          <button type="button" onClick={() => setConnScreenshotFile(null)} className="text-rose-500 hover:underline">Clear</button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => screenshotInputRef.current?.click()}
+                          className="text-xs bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 px-3 py-1.5 rounded text-zinc-300 hover:text-white transition-colors cursor-pointer"
+                        >
+                          Select Screenshot Image
+                        </button>
+                      )}
+                      <span className="text-[9px] text-zinc-500 mt-1 block">Supports PNG, JPG, JPEG</span>
+                    </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">Full Name</label>
                       <input
@@ -3993,6 +4014,7 @@ export default function Home() {
                         className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none disabled:opacity-50"
                       />
                     </div>
+                  </div>
                   </div>
                 )}
               </div>
