@@ -918,6 +918,17 @@ def generate_outreach_email(
         "posed and not answered, a specific problem named and not resolved. Do not explain everything. "
         "Give them a reason to want to write back, not a document to file away.\n\n"
 
+        "BE WARM AND LOW-PRESSURE, NOT CLEVER.\n"
+        "Specific does not mean sharp, and confident does not mean pushy. This email is a stranger asking "
+        "another person for a small piece of their time, and it should feel like that: genuine, a little "
+        "humble, easy to say no to. Two things make that land. First, give them a real out, in their own "
+        "words, near the ask ('no worries if you're slammed', 'totally fine if not'). Second, never imply "
+        "they owe you a reply, never guilt ('I know you're busy but...' used as leverage), and never chase "
+        "a clever line at the cost of sounding like a person. If a sentence would make you wince to receive "
+        "it from a stranger, rewrite it plainer.\n"
+        "Warmth is not flattery. Do not compliment them to buy goodwill. Being specific about their actual "
+        "work, and being brief with their time, IS the respect.\n\n"
+
         "Never open with a fake-urgency or gimmick line, and never announce what the email is or is not. "
         "Writing 'this is not a template' or 'this is not an AI email' is self-defeating: it puts the "
         "suspicion in their head, spends the most valuable line in the email on defending yourself, and "
@@ -946,6 +957,15 @@ def generate_outreach_email(
         "use a comma, a period, or 'and'/'but'. Em dashes are the single clearest tell that a machine wrote this.\n"
         "- Use contractions the way people actually type: I'm, I've, it's, that's, don't, wouldn't.\n"
         "- Vary sentence length hard. A long one, then a short one. Uniform medium-length sentences read as generated.\n"
+        "- Write it the way you'd type it, not the way you'd format it. A short fragment on its own is fine "
+        "('Long story.'). Starting a sentence with 'And' or 'But' is fine. One aside in parentheses is fine. "
+        "Perfectly balanced, evenly weighted sentences are the tell.\n"
+        "- Let one small human thing through: an admission ('I got this wrong for months'), a mild opinion, "
+        "a specific frustration. Flawless and neutral reads as generated. A person has a point of view.\n"
+        "- Do not repeat their name after the greeting. Using someone's name mid-email is a sales tactic and "
+        "everyone can feel it.\n"
+        "- Read the finished email out loud in your head. If any sentence is one you would never actually say "
+        "to a person, rewrite it in the words you would really use.\n"
         "- Banned phrases, absolutely no exceptions: 'I hope this email finds you well', 'I hope you're doing well', "
         "'I wanted to reach out', 'I came across your profile', 'I was impressed by', 'I stumbled upon', 'as I was "
         "going through', 'delve', 'leverage', 'synergy', 'unlock', 'game-changer', 'passionate about', 'circle back', "
@@ -1010,7 +1030,36 @@ def generate_outreach_email(
         "arrives only after the hook. The ask costs them two sentences. And the subject is the headline of "
         "that same question, so opening the email delivers exactly what the subject promised.\n\n"
 
-        "Match the STRONG pattern. Never the WEAK one."
+        "The STRONG example above is an engineer-to-engineer email. The register has to shift with who is "
+        "receiving it, and the two below show how. Same rules throughout: they lead with the recipient, the "
+        "credential is one line, the ask is small, and there is a real out at the end. Only the substance of "
+        "the ask changes. As above, every bracketed part is filled from the sender's actual profile, never "
+        "from these examples.\n\n"
+
+        "RECRUITER / TALENT. They are not going to debate architecture with you, so do not ask them to. "
+        "Be concrete about what you are and what you want, and make the reply cheap:\n"
+        "  Subject: whether the [role type] pipeline is open\n"
+        "  'Hi [name], are you still filling [specific role or team they posted about], or has that closed?\n\n"
+        "  [One line: sender's actual current status and the single most relevant thing about them.] If it's "
+        "open I'll send a proper application. If it's not, I'd rather not clog your inbox.\n\n"
+        "  Either way, thanks. No worries if you're buried.'\n"
+        "  Why it works: it asks one binary question they can answer in four words, it respects that their "
+        "inbox is the worst inbox in the company, and it does not pretend to be a peer conversation.\n\n"
+
+        "FOUNDER / VP / DIRECTOR. Do not ask for a meeting, a coffee chat, or a referral. Their scarcest "
+        "resource is attention, and a meeting request from a stranger is the most expensive thing you can "
+        "ask for. Ask one sharp question about a decision they actually made:\n"
+        "  Subject: the [specific bet or decision] call\n"
+        "  'Hi [name], you moved [specific thing their company did] before most people in the space did. Was "
+        "that a conviction call or did the constraints just force it?\n\n"
+        "  [One line on the sender's actual current status and why this matters to them specifically.]\n\n"
+        "  Genuinely curious, and no reply needed if you're heads-down.'\n"
+        "  Why it works: senior people will answer a question about their own judgment when they will ignore "
+        "everything else, because it is the one thing nobody else can answer. It asks for a sentence, not a "
+        "calendar slot, and it gives them an explicit exit.\n\n"
+
+        "Pick the register that matches the recipient's actual seniority from the profile below. Match the "
+        "STRONG pattern. Never the WEAK one."
     )
 
     prompt = f"""
@@ -1067,6 +1116,12 @@ def generate_outreach_email(
       - Does the word "Unknown" appear anywhere, or does any sentence reference a field you didn't actually have
         data for? If yes, rewrite that sentence using only confirmed facts.
       - Are there any exclamation marks? There must be none.
+      - Does the ask give them an easy, genuine out, in plain words? If refusing would feel awkward, add one.
+      - Does the register match their seniority (peer question / recruiter binary / senior judgment call), and
+        does it avoid asking a founder, VP or director for a meeting or referral?
+      - Is their name used anywhere after the greeting? Remove it.
+      - Is every sentence one a real person would actually say out loud? Rewrite any that isn't.
+      - Does it read as a person with a point of view rather than a flawless neutral assistant?
 
     Return ONLY raw JSON, no markdown fences, with exactly these fields:
     - "subject": the subject line
