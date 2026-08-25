@@ -29,6 +29,47 @@ function useDebouncedSave(value: string, save: (v: string) => void, enabled: boo
   }, [value, enabled]);
 }
 
+// Fades a section in the first time it scrolls into view, then leaves it alone.
+function useRevealOnScroll<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null);
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setVisible(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.15 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return { ref, visible };
+}
+
+function LandingFeatureCard({ icon: Icon, title, desc, delay }: { icon: typeof Users; title: string; desc: string; delay: number }) {
+  const { ref, visible } = useRevealOnScroll<HTMLDivElement>();
+  return (
+    <div
+      ref={ref}
+      className="bg-white/[0.03] border border-white/10 rounded-xl p-5 hover:border-[#4d8565]/30 hover:bg-white/[0.05] transition-all duration-500"
+      style={{
+        opacity: visible ? 1 : 0,
+        transform: visible ? "translateY(0)" : "translateY(16px)",
+        transitionDelay: `${delay}ms`,
+      }}
+    >
+      <Icon size={20} className="text-[#4d8565] mb-3" />
+      <div className="text-sm font-semibold text-zinc-100">{title}</div>
+      <div className="text-xs text-zinc-500 mt-1.5 leading-relaxed">{desc}</div>
+    </div>
+  );
+}
+
 export default function Home() {
   // Authentication State
   const [token, setToken] = useState<string | null>(null);
@@ -1087,21 +1128,33 @@ export default function Home() {
     ];
 
     return (
-      <div className="min-h-screen bg-zinc-950 text-zinc-200 relative overflow-hidden">
-        <div
-          className="pointer-events-none absolute inset-0"
-          style={{ background: "radial-gradient(ellipse 900px 600px at 25% 30%, rgba(77,133,101,0.08), transparent 70%)" }}
-        />
+      <div className="min-h-screen bg-zinc-950 text-zinc-200">
+        {/* NAV */}
+        <nav className="sticky top-0 z-20 border-b border-white/10 bg-zinc-950/80 backdrop-blur-md">
+          <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <img src="/icon-192.png" alt="networKING.agent" className="w-7 h-7 rounded-md" />
+              <span className="text-sm font-extrabold tracking-tight text-[#ebe5d6]">
+                networ<span className="text-[#4d8565]">KING</span>.agent
+              </span>
+            </div>
+            <Link
+              href="/login"
+              className="bg-[#4d8565] hover:bg-[#5a9873] text-zinc-950 text-xs font-bold px-4 py-2 rounded-full transition-colors"
+            >
+              Sign In
+            </Link>
+          </div>
+        </nav>
 
-        <div className="relative min-h-screen flex flex-col lg:flex-row">
-          {/* LEFT: brand / services */}
-          <div className="flex-1 flex flex-col justify-center px-6 sm:px-12 lg:px-20 py-16">
-            <div className="max-w-xl mx-auto lg:mx-0 w-full">
-              <div className="flex items-center gap-3 mb-8">
-                <img src="/icon-192.png" alt="networKING.agent" className="w-11 h-11 rounded-xl shadow-lg shadow-[#4d8565]/20" />
-              </div>
-
-              <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-[#ebe5d6] leading-[1.1] min-h-[2.2em] sm:min-h-[2.4em]">
+        {/* HERO */}
+        <div className="relative overflow-hidden border-b border-white/10">
+          <div
+            className="pointer-events-none absolute inset-0"
+            style={{ background: "radial-gradient(ellipse 900px 500px at 50% 0%, rgba(77,133,101,0.1), transparent 70%)" }}
+          />
+          <div className="relative max-w-3xl mx-auto px-6 py-20 sm:py-28 text-center">
+              <h1 className="text-4xl sm:text-6xl font-extrabold tracking-tight text-[#ebe5d6] leading-[1.1] min-h-[2.2em] sm:min-h-[2.4em]">
                 {(() => {
                   const HERO_LINE1 = "Welcome to";
                   const HERO_PREFIX = "networ";
@@ -1158,55 +1211,54 @@ export default function Home() {
                   );
                 })()}
               </h1>
-              <p className="mt-5 text-base sm:text-lg text-zinc-400 leading-relaxed">
-                Hi, I'm Rishindra Mateti, the developer and creator of this project.
+              <p className="mt-6 text-base sm:text-lg text-zinc-400 leading-relaxed">
+                Hi, I'm{" "}
+                <span
+                  className="text-2xl sm:text-3xl text-[#4d8565] align-middle"
+                  style={{ fontFamily: "var(--font-signature)" }}
+                >
+                  Rishindra Mateti ,
+                </span>{" "}
+                the developer and creator of this project.
                 Real LinkedIn outreach takes real research per person, and I wanted
                 that research done well, so my own time goes into judgment: who to
                 reach out to, what to actually say, and whether to hit send.
               </p>
 
-              <div className="mt-10 grid sm:grid-cols-2 gap-4">
-                {features.map(f => (
-                  <div key={f.title} className="bg-white/[0.03] border border-white/10 rounded-xl p-4 hover:border-[#4d8565]/30 transition-colors">
-                    <f.icon size={18} className="text-[#4d8565] mb-2" />
-                    <div className="text-sm font-semibold text-zinc-100">{f.title}</div>
-                    <div className="text-xs text-zinc-500 mt-1.5 leading-relaxed">{f.desc}</div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-8 flex items-start gap-2 text-[11px] text-zinc-500">
-                <ShieldCheck size={14} className="text-[#4d8565] mt-0.5 shrink-0" />
-                <span>No LinkedIn bot or bulk messaging. API keys encrypted at rest. BYOK, bring your own key.</span>
-              </div>
-            </div>
-          </div>
-
-          {/* RIGHT: sign in / sign up CTA */}
-          <div className="flex-1 flex items-center justify-center px-4 py-16 border-t lg:border-t-0 lg:border-l border-white/10">
-            <div className="max-w-sm w-full text-center">
-              <img src="/icon-192.png" alt="networKING.agent" className="w-10 h-10 mx-auto mb-5" />
-              <h2 className="text-xl font-bold text-[#ebe5d6]">Already a user?</h2>
-              <p className="text-sm text-zinc-500 mt-2">
-                Sign in to pick up your outreach pipeline where you left it.
-              </p>
-
-              <div className="mt-6 bg-zinc-900 border border-white/10 rounded-2xl p-6 shadow-2xl shadow-black/40">
+              <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
                 <Link
                   href="/login"
-                  className="block w-full bg-[#4d8565] hover:bg-[#5a9873] text-zinc-950 text-sm font-bold py-2.5 rounded-lg transition-colors"
+                  className="bg-[#4d8565] hover:bg-[#5a9873] text-zinc-950 text-sm font-bold px-6 py-3 rounded-lg transition-colors"
                 >
                   Sign In
                 </Link>
-
                 <Link
                   href="/login?mode=register"
-                  className="block mt-4 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                  className="border border-white/15 hover:border-white/30 text-zinc-200 text-sm font-semibold px-6 py-3 rounded-lg transition-colors"
                 >
-                  New here? <span className="text-[#4d8565] font-medium">Create a free account</span>
+                  Create a free account
                 </Link>
               </div>
-            </div>
+          </div>
+        </div>
+
+        {/* FEATURES */}
+        <div className="max-w-6xl mx-auto px-6 py-20 sm:py-28">
+          <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[#ebe5d6] text-center">
+            What it actually does
+          </h2>
+          <div className="mt-12 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {features.map((f, i) => (
+              <LandingFeatureCard key={f.title} icon={f.icon} title={f.title} desc={f.desc} delay={i * 80} />
+            ))}
+          </div>
+        </div>
+
+        {/* TRUST LINE */}
+        <div className="border-t border-white/10">
+          <div className="max-w-6xl mx-auto px-6 py-8 flex items-center justify-center gap-2 text-[11px] text-zinc-500 text-center">
+            <ShieldCheck size={14} className="text-[#4d8565] shrink-0" />
+            <span>No LinkedIn bot or bulk messaging. API keys encrypted at rest. BYOK, bring your own key.</span>
           </div>
         </div>
       </div>
