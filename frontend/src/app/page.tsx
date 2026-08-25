@@ -3377,11 +3377,11 @@ export default function Home() {
                           </div>
                           <div className="flex justify-between border-b border-zinc-800 pb-1">
                             <span className="text-[10px] text-zinc-500">Experience at {data.company || "current company"}</span>
-                            <span className="text-white font-medium">{data.current_company_years_experience ? `${data.current_company_years_experience} Yrs` : "N/A"}</span>
+                            <span className="text-white font-medium">{selectedConnection.current_company_years_experience ? `${selectedConnection.current_company_years_experience} Yrs` : "N/A"}</span>
                           </div>
                           <div className="flex justify-between border-b border-zinc-800 pb-1">
                             <span className="text-[10px] text-zinc-500">Total Experience</span>
-                            <span className="text-white font-medium">{data.years_experience ? `${data.years_experience} Yrs` : "N/A"}</span>
+                            <span className="text-white font-medium">{selectedConnection.years_experience ? `${selectedConnection.years_experience} Yrs` : "N/A"}</span>
                           </div>
                           <div className="flex justify-between border-b border-zinc-800 pb-1">
                             <span className="text-[10px] text-zinc-500">Target Angle</span>
