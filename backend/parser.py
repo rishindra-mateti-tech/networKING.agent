@@ -180,6 +180,49 @@ def _extract_company_from_experience(lines: list) -> str:
     return None
 
 
+def _extract_current_company_tenure(lines: list) -> float:
+    """
+    Approximates time spent at the CURRENT employer specifically, from the
+    duration or date range on the first entry in the Experience section.
+    LinkedIn always lists the most recent role first, so that entry -- unlike
+    years_experience, which sums the whole document -- describes the current
+    job alone.
+    """
+    current_year = datetime.date.today().year
+    for i, line in enumerate(lines):
+        if line.strip().lower() != "experience":
+            continue
+        window = lines[i + 1: i + 8]
+
+        # LinkedIn frequently computes this itself: "7 mos", "1 yr 11 mos"
+        for c in window:
+            m = re.match(
+                r"^(?:(\d+)\s*(?:years?|yrs?))?\s*(?:(\d+)\s*(?:months?|mos?))?$",
+                c.strip(), re.IGNORECASE
+            )
+            if m and (m.group(1) or m.group(2)):
+                yrs = int(m.group(1) or 0)
+                mos = int(m.group(2) or 0)
+                return round(yrs + mos / 12, 1)
+
+        # Otherwise derive it from the date range itself
+        for c in window:
+            m = re.search(
+                r"(\b20\d{2}\b)\s*[-–—]\s*(?:[A-Za-z]+\.?\s+)?(\b20\d{2}\b|Present)",
+                c, re.IGNORECASE
+            )
+            if m:
+                start_yr = int(m.group(1))
+                end = m.group(2)
+                end_yr = current_year if end.lower() == "present" else int(end)
+                diff = end_yr - start_yr
+                if diff < 0 or diff > 20:
+                    return None
+                return float(diff) if diff > 0 else 0.5
+        return None
+    return None
+
+
 def _rejoin_wrapped_urls(pdf_text: str) -> str:
     """
     The narrow sidebar column wraps long values across a line break, which
@@ -426,6 +469,7 @@ def extract_linkedin_profile_metadata(pdf_text: str) -> dict:
         "location": None,
         "connection_count": 500,  # Default
         "years_experience": 0.0,
+        "current_company_years_experience": None,
         "profile_url": None,
         "email": None
     }
@@ -588,6 +632,8 @@ def extract_linkedin_profile_metadata(pdf_text: str) -> dict:
 
     if total_years > 0:
         metadata["years_experience"] = round(min(total_years, 35.0), 1)
+
+    metadata["current_company_years_experience"] = _extract_current_company_tenure(lines)
 
     return metadata
 

@@ -582,6 +582,7 @@ async def upload_linkedin_profile(
     profile_text = None
     connection_count_val = connection_count
     years_experience = 0.0
+    current_company_years_experience = None
     pdf_filename = None
     candidate_email = None
 
@@ -600,6 +601,7 @@ async def upload_linkedin_profile(
             if connection_count_val is None:
                 connection_count_val = extracted["connection_count"]
             years_experience = extracted["years_experience"]
+            current_company_years_experience = extracted.get("current_company_years_experience")
             if not profile_url:
                 profile_url = extracted.get("profile_url")
             candidate_email = extracted.get("email")
@@ -663,6 +665,8 @@ async def upload_linkedin_profile(
             existing.connection_count = connection_count_val
         if years_experience:
             existing.years_experience = years_experience
+        if current_company_years_experience is not None:
+            existing.current_company_years_experience = current_company_years_experience
         if profile_text:
             existing.profile_text = profile_text
         if posts:
@@ -710,6 +714,7 @@ async def upload_linkedin_profile(
         location=location,
         connection_count=connection_count_val or 0,
         years_experience=years_experience,
+        current_company_years_experience=current_company_years_experience,
         profile_text=profile_text,
         posts_text=posts,
         profile_url=profile_url,

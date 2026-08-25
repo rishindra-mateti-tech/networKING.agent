@@ -419,8 +419,11 @@ class QueueOrchestrator:
                         connection.personalization_data = bridge_data["personalization_data"]
                         connection.context_summary = bridge_data["context_summary"]
                         
-                        # Save new platform metrics
-                        connection.current_company_years_experience = bridge_data.get("current_company_years_experience")
+                        # Save new platform metrics. Tenure at the current company is
+                        # deterministically parsed from the PDF at upload time (parser.py);
+                        # only fall back to the AI's estimate when that parse found nothing.
+                        if connection.current_company_years_experience is None:
+                            connection.current_company_years_experience = bridge_data.get("current_company_years_experience")
                         connection.networking_score = bridge_data["networking_score"]
                         connection.reply_probability = bridge_data["reply_probability"]
                         connection.hiring_probability_score = bridge_data["hiring_probability_score"]
