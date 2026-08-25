@@ -4,11 +4,13 @@ import html
 import httpx
 import os
 from typing import List, Optional
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import FastAPI, Depends, HTTPException, Request, status, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.exc import DataError
 
 import models
 import schemas
@@ -42,6 +44,31 @@ run_migrations()
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="networKING.agent SaaS API", version="1.0.0")
+
+
+@app.exception_handler(OverflowError)
+async def _out_of_range_id_handler(request: Request, exc: OverflowError):
+    """
+    A path id larger than the database's integer range blows up inside the
+    driver while binding the parameter, before the query runs, which surfaces
+    to the caller as a 500. No row can ever carry such an id, so the honest
+    answer is the same one any other non-existent id gets.
+    """
+    return JSONResponse(status_code=404, content={"detail": "Not Found"})
+
+
+@app.exception_handler(DataError)
+async def _db_data_error_handler(request: Request, exc: DataError):
+    """
+    Postgres reports the same out-of-range id as a DataError rather than an
+    OverflowError, so the production path needs its own case. Only range
+    errors are translated; every other DataError is a genuine fault and is
+    re-raised so it stays visible instead of being masked as a 404.
+    """
+    if "out of range" in str(exc).lower():
+        return JSONResponse(status_code=404, content={"detail": "Not Found"})
+    raise exc
+
 
 @app.get("/health")
 def health_check():
@@ -524,6 +551,23 @@ async def create_connection(data: schemas.ConnectionCreate, current_user: models
     QueueOrchestrator().trigger_now(current_user.id)
     return new_conn
 
+# Values that land in name/company when extraction failed rather than because
+# they describe anyone. They are shared by every failed upload, so they can
+# never be used to decide that two uploads are the same person.
+_PLACEHOLDER_IDENTITY_VALUES = {
+    "unknown candidate", "unknown", "unknown company", "candidate",
+    "n/a", "na", "none", "null", "unnamed", "company", "-", "--",
+}
+
+
+def _is_placeholder_identity(name: Optional[str], company: Optional[str]) -> bool:
+    """True when name or company is an extraction-failure placeholder rather than a real value."""
+    for value in (name, company):
+        if not value or value.strip().lower() in _PLACEHOLDER_IDENTITY_VALUES:
+            return True
+    return False
+
+
 def _find_duplicate_connection(db: Session, user_id: int, profile_url: Optional[str], candidate_email: Optional[str], name: Optional[str], company: Optional[str]) -> Optional["models.Connection"]:
     """
     Looks for a Connection already belonging to this user that represents the
@@ -551,7 +595,14 @@ def _find_duplicate_connection(db: Session, user_id: int, profile_url: Optional[
         if match:
             return match
 
-    if name and company:
+    # The name+company fallback is only safe when the name actually identifies
+    # a person. When a PDF fails to parse, every such upload lands on the same
+    # placeholder ("Unknown Candidate"), so matching on it would merge two
+    # completely different people into one record, overwriting the first
+    # person's details with the second's while keeping the first person's
+    # pipeline history. Slug and email matches above are exact identifiers and
+    # stay trustworthy; this one is a heuristic and has to be held back.
+    if name and company and not _is_placeholder_identity(name, company):
         match = db.query(models.Connection).filter(
             models.Connection.user_id == user_id,
             func.lower(models.Connection.name) == name.strip().lower(),
