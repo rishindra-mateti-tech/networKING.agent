@@ -1997,7 +1997,9 @@ export default function Home() {
               </h3>
               <p className="text-xs text-zinc-400 mb-4">
                 Auto-detected from your resume when available. Clickable so you can verify them, and used when a
-                conversation calls for sharing a link directly (e.g. a recruiter asking for your GitHub).
+                conversation calls for sharing a link directly (e.g. a recruiter asking for your GitHub). Detection
+                is plain code (regex pattern matching), not AI. Every resume is formatted differently, so if a link
+                comes out wrong or missing, just correct it below and it'll stick.
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
