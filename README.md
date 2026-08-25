@@ -123,6 +123,30 @@ app's "API Key Workers" screen after you sign up.
 Deploying this somewhere real (Render + Neon Postgres + Vercel, entirely
 free, no card required): see [DEPLOY.md](DEPLOY.md).
 
+## Tests
+
+```bash
+cd backend && python tests/run_all.py
+```
+
+No test framework to install, and it runs against a temporary database, so
+it never touches your real one. Three areas are covered, chosen because
+they're where this app can fail quietly rather than loudly:
+
+- **Cross-tenant isolation.** Every id-addressed endpoint is attacked by a
+  second account against the first account's data. In a multi-tenant tool,
+  one account reading another's contacts is the worst thing that can happen.
+- **Parsing and duplicate detection.** Real LinkedIn exports differ by
+  locale, layout and export version, so the parser is fed empty, enormous,
+  non-Latin and control-character input and must always return something
+  usable. Duplicate detection is checked against the case that actually
+  loses data: two different people whose names both failed to extract.
+- **Generation robustness.** The model is the least predictable dependency
+  here. It gets fed prose instead of JSON, truncated objects and fenced
+  output, and a worker still has to produce a usable record instead of
+  stranding the contact mid-pipeline. These stub the API call, so running
+  the suite costs nothing.
+
 ## License
 
 MIT, see [LICENSE](LICENSE). Use it, fork it, adapt it, attribution
