@@ -947,15 +947,29 @@ def generate_outreach_email(
         "- Use contractions the way people actually type: I'm, I've, it's, that's, don't, wouldn't.\n"
         "- Vary sentence length hard. A long one, then a short one. Uniform medium-length sentences read as generated.\n"
         "- Banned phrases, absolutely no exceptions: 'I hope this email finds you well', 'I hope you're doing well', "
-        "'I wanted to reach out', 'I came across your profile', 'I was impressed by', 'delve', 'leverage', 'synergy', "
-        "'unlock', 'game-changer', 'passionate about', 'circle back', 'touch base', 'pick your brain', 'thought leader', "
-        "'in today's fast-paced world', 'navigate the landscape', 'I'd love to connect', 'excited to connect', "
-        "'Looking forward to hearing from you', 'Thanks in advance', 'at your earliest convenience', 'reach out if'.\n"
+        "'I wanted to reach out', 'I came across your profile', 'I was impressed by', 'I stumbled upon', 'as I was "
+        "going through', 'delve', 'leverage', 'synergy', 'unlock', 'game-changer', 'passionate about', 'circle back', "
+        "'touch base', 'pick your brain', 'thought leader', 'innovative', 'cutting-edge', 'in today's fast-paced "
+        "world', 'navigate the landscape', 'I'd love to connect', 'excited to connect', 'Looking forward to hearing "
+        "from you', 'Looking forward to connecting', 'Talk soon', 'Thanks in advance', 'at your earliest "
+        "convenience', 'reach out if', 'let me know your thoughts'.\n"
         "- No stacked adjectives and no praise inflation ('incredible work', 'truly inspiring', 'amazing journey'). "
         "Describe concretely what they did. Specificity IS the compliment.\n"
+        "- No listing two or more of their technologies/skills back at them in one clause ('your work with X, Y "
+        "and Z') as a substitute for an actual observation. A list is not a thought.\n"
+        "- No exclamation marks. Genuine interest reads as interest without one.\n"
+        "- No rhetorical filler questions used as a paragraph transition ('Ever wonder how...', 'What if...'). "
+        "The one real question in the email is the ask itself, not a warm-up act.\n"
         "- No bullet points, no headers, no bold. This is an email between two people, not a deck.\n"
         "- Do not open with the user's own resume. Lead with them, then earn the right to say who you are in one line.\n"
         "- Sign off plainly: 'Thanks,' or 'Best,' then the name. Nothing more elaborate.\n\n"
+
+        "HANDLING MISSING DATA:\n"
+        "Some fields below may read 'Unknown' or 'None available' because the research didn't turn it up. Never "
+        "write the word 'Unknown' into the email, and never reference a field that says it or apologize for not "
+        "knowing something ('I couldn't find much about your role, but...'). Silently write around it: build the "
+        "email only from what the profile actually established. If most fields are Unknown, that's a signal to "
+        "use the HONEST COLD OPEN and keep the email short, not a gap to paper over with invented specifics.\n\n"
 
         "HONESTY RULES, THESE OVERRIDE EVERYTHING ELSE:\n"
         "- Only state facts about the user that appear in the profile provided. Never invent a job, a school, a "
@@ -1050,6 +1064,9 @@ def generate_outreach_email(
       - Is there a real question or unresolved thread that makes replying feel natural?
       - Is the body under 130 words?
       - Are there any em dashes? There must be none.
+      - Does the word "Unknown" appear anywhere, or does any sentence reference a field you didn't actually have
+        data for? If yes, rewrite that sentence using only confirmed facts.
+      - Are there any exclamation marks? There must be none.
 
     Return ONLY raw JSON, no markdown fences, with exactly these fields:
     - "subject": the subject line
