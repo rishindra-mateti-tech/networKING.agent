@@ -1268,7 +1268,7 @@ export default function Home() {
                 className="mt-5 inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-amber-400 transition-colors"
               >
                 <Star size={13} />
-                Star this project on GitHub
+                Star my work on GitHub
               </a>
           </div>
         </div>
