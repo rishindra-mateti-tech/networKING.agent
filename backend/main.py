@@ -164,7 +164,7 @@ def _init_default_settings(db: Session, user_id: int):
     basic_keys = [
         "resume_context", "resume_latex", "github_url",
         "portfolio_url", "linkedin_url", "telegram_token",
-        "telegram_chat_id", "slack_webhook_url", "pacing_interval_minutes",
+        "telegram_chat_id", "telegram_enabled", "slack_webhook_url", "slack_enabled", "pacing_interval_minutes",
         "job_search_status", "target_roles", "learning_goals", "tone_examples",
         "email_client_preference", "twin_understanding", "twin_extra_notes",
         "resume_filename", "contact_email", "contact_phone", "resume_location",

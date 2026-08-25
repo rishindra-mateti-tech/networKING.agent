@@ -6,7 +6,7 @@ import {
   Users, User, Key, Settings, LogOut, Search, Plus, Star, Trash2,
   Send, RefreshCw, Check, Copy, Clipboard, FileText, ArrowRight, MessageSquare, AlertCircle,
   Zap, Loader2, Menu, X, BarChart3, ImagePlus, Sparkles, Mail, ExternalLink, ChevronDown, ChevronRight,
-  Code2, Contact, Globe, Pencil, Link2, ShieldCheck, Bell
+  Code2, Contact, Globe, Pencil, Link2, ShieldCheck, Bell, Target, MessageCircle
 } from "lucide-react";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -68,6 +68,21 @@ function LandingFeatureCard({ icon: Icon, title, desc, delay }: { icon: typeof U
       <div className="text-xs text-zinc-500 mt-1.5 leading-relaxed">{desc}</div>
     </div>
   );
+}
+
+// Avatar color doubles as a hidden read of the networking score: red is a
+// weak match, amber is moderate, the brand green is a strong one. Ungraded
+// people (still in the pipeline) get a neutral gray.
+function avatarStyle(score: number | null | undefined) {
+  if (score == null) return "bg-white/10 text-zinc-400";
+  if (score >= 7.5) return "bg-[#4d8565]/25 text-[#8fc7a4]";
+  if (score >= 5) return "bg-amber-500/20 text-amber-300";
+  return "bg-rose-500/20 text-rose-300";
+}
+function initialsOf(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
 }
 
 export default function Home() {
@@ -211,12 +226,14 @@ export default function Home() {
   const [telegramTestLoading, setTelegramTestLoading] = useState(false);
   const [telegramTestMessage, setTelegramTestMessage] = useState("");
   const [telegramTestError, setTelegramTestError] = useState("");
+  const [telegramEnabled, setTelegramEnabled] = useState(true);
 
   // Slack integration state
   const [slackWebhookUrl, setSlackWebhookUrl] = useState("");
   const [slackTestLoading, setSlackTestLoading] = useState(false);
   const [slackTestMessage, setSlackTestMessage] = useState("");
   const [slackTestError, setSlackTestError] = useState("");
+  const [slackEnabled, setSlackEnabled] = useState(true);
 
   // Interaction Log Chat Thread State
   const [threadLogs, setThreadLogs] = useState<any[]>([]);
@@ -447,7 +464,9 @@ export default function Home() {
         setLatexCode(mapped["resume_latex"] || "");
         setTelegramToken(mapped["telegram_token"] || "");
         setTelegramChatId(mapped["telegram_chat_id"] || "");
+        setTelegramEnabled(mapped["telegram_enabled"] !== "false");
         setSlackWebhookUrl(mapped["slack_webhook_url"] || "");
+        setSlackEnabled(mapped["slack_enabled"] !== "false");
         setEmailClientPreference(mapped["email_client_preference"] || "gmail");
         setTwinUnderstanding(mapped["twin_understanding"] || "");
         setTwinExtraNotes(mapped["twin_extra_notes"] || "");
@@ -1223,6 +1242,8 @@ export default function Home() {
                 Real LinkedIn outreach takes real research per person, and I wanted
                 that research done well, so my own time goes into judgment: who to
                 reach out to, what to actually say, and whether to hit send.
+                So I turned my own research process into an automation pipeline,
+                and that became this project. Use it yourself by signing up below.
               </p>
 
               <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
@@ -1239,6 +1260,16 @@ export default function Home() {
                   Create a free account
                 </Link>
               </div>
+
+              <a
+                href="https://github.com/rishindra-mateti-tech/networKING.agent"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-5 inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-amber-400 transition-colors"
+              >
+                <Star size={13} />
+                Star this project on GitHub
+              </a>
           </div>
         </div>
 
@@ -1275,7 +1306,7 @@ export default function Home() {
   // Shared across the three main pages. Lets the user interrogate their own
   // outreach data in plain language, answered by their own Gemini keys.
   const renderAnalyticsPanel = () => (
-    <div className="bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-xl overflow-hidden">
+    <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl overflow-hidden">
       <button
         onClick={() => setShowAnalyticsPanel(v => !v)}
         className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-white/[0.02] transition-colors cursor-pointer"
@@ -1371,11 +1402,14 @@ export default function Home() {
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
           <button
             onClick={() => goToView("pipeline")}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-              currentView === "pipeline" ? "bg-zinc-800 text-white font-semibold" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+            className={`relative w-full flex items-center space-x-3 pl-4 pr-4 py-3 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+              currentView === "pipeline" ? "bg-[#4d8565]/10 text-white font-semibold" : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
             }`}
           >
-            <Users size={18} />
+            {currentView === "pipeline" && (
+              <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-r bg-[#4d8565]" />
+            )}
+            <Users size={18} className={currentView === "pipeline" ? "text-[#4d8565]" : ""} />
             <span>Outreach Pipeline</span>
           </button>
 
@@ -1385,20 +1419,26 @@ export default function Home() {
 
           <button
             onClick={() => goToView("twinagent")}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-              currentView === "twinagent" ? "bg-zinc-800 text-white font-semibold" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+            className={`relative w-full flex items-center space-x-3 pl-4 pr-4 py-3 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+              currentView === "twinagent" ? "bg-[#4d8565]/10 text-white font-semibold" : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
             }`}
           >
-            <User size={18} />
+            {currentView === "twinagent" && (
+              <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-r bg-[#4d8565]" />
+            )}
+            <User size={18} className={currentView === "twinagent" ? "text-[#4d8565]" : ""} />
             <span>TwinAgent Profile</span>
           </button>
           <button
             onClick={() => goToView("apikeys")}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-              currentView === "apikeys" ? "bg-zinc-800 text-white font-semibold" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+            className={`relative w-full flex items-center space-x-3 pl-4 pr-4 py-3 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+              currentView === "apikeys" ? "bg-[#4d8565]/10 text-white font-semibold" : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
             }`}
           >
-            <Key size={18} />
+            {currentView === "apikeys" && (
+              <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-r bg-[#4d8565]" />
+            )}
+            <Key size={18} className={currentView === "apikeys" ? "text-[#4d8565]" : ""} />
             <div className="flex-1 flex items-center justify-between">
               <span>API Key Workers</span>
               {activeWorkersCount > 0 && (
@@ -1410,11 +1450,14 @@ export default function Home() {
           </button>
           <button
             onClick={() => goToView("settings")}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-              currentView === "settings" ? "bg-zinc-800 text-white font-semibold" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+            className={`relative w-full flex items-center space-x-3 pl-4 pr-4 py-3 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+              currentView === "settings" ? "bg-[#4d8565]/10 text-white font-semibold" : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
             }`}
           >
-            <Settings size={18} />
+            {currentView === "settings" && (
+              <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-r bg-[#4d8565]" />
+            )}
+            <Settings size={18} className={currentView === "settings" ? "text-[#4d8565]" : ""} />
             <span>Notifications & Pacing</span>
           </button>
         </nav>
@@ -1467,7 +1510,7 @@ export default function Home() {
         {/* The three main tabs live inside this page, not in the sidebar */}
         {currentView === "pipeline" && (
           <div className="px-6 pt-5 pb-1 shrink-0">
-            <div className="inline-flex items-center gap-1 bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-xl p-1">
+            <div className="inline-flex items-center gap-1 bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-1">
               {([
                 { id: "target", label: "Outreach Target", icon: <Users size={14} /> },
                 { id: "uploads", label: "Uploads", icon: <FileText size={14} />, count: connections.length },
@@ -1631,8 +1674,15 @@ export default function Home() {
                     <div
                       key={conn.id}
                       onClick={() => setSelectedConnection(conn)}
-                      className="bg-white/[0.03] backdrop-blur-xl border border-white/10 hover:border-white/20 rounded-xl px-4 py-3 cursor-pointer transition-colors group flex items-center gap-4"
+                      className="bg-white/[0.03] hover:bg-white/[0.05] backdrop-blur-xl border border-white/10 hover:border-white/20 rounded-xl px-4 py-3.5 cursor-pointer transition-all hover:shadow-lg hover:shadow-black/20 group flex items-center gap-4"
                     >
+                      {/* Avatar */}
+                      <div
+                        className={`shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-[11px] font-bold ${avatarStyle(conn.networking_score)}`}
+                      >
+                        {initialsOf(conn.name)}
+                      </div>
+
                       {/* Identity */}
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
@@ -1743,7 +1793,10 @@ export default function Home() {
           <div className="p-4 sm:p-6 w-full space-y-4">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
-                <h2 className="text-2xl font-bold text-white">Uploads</h2>
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                  <FileText size={20} className="text-[#4d8565]" />
+                  Uploads
+                </h2>
                 <p className="text-xs text-zinc-400 mt-1">
                   Every profile you've fed in, what came out of it, and what to do next.
                 </p>
@@ -1785,7 +1838,7 @@ export default function Home() {
               }}
             />
 
-            <div className="bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-xl overflow-hidden">
+            <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead>
@@ -1820,23 +1873,30 @@ export default function Home() {
                             <td className="py-2 px-3 text-zinc-500 font-mono text-[10px] max-w-[140px] truncate" title={conn.pdf_filename || ""}>
                               {conn.pdf_filename || "manual entry"}
                             </td>
-                            <td className="py-2 px-3">
-                              {conn.profile_url ? (
-                                <a
-                                  href={conn.profile_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-zinc-100 font-medium hover:text-[#4d8565] hover:underline inline-flex items-center gap-1"
-                                >
-                                  {conn.name}
-                                  <ExternalLink size={10} className="opacity-50" />
-                                </a>
-                              ) : (
-                                <span className="text-zinc-100 font-medium">{conn.name}</span>
-                              )}
-                              {conn.current_title && (
-                                <span className="block text-[10px] text-zinc-500 truncate max-w-[180px]">{conn.current_title}</span>
-                              )}
+                            <td className="py-2.5 px-3">
+                              <div className="flex items-center gap-2.5">
+                                <div className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold ${avatarStyle(conn.networking_score)}`}>
+                                  {initialsOf(conn.name)}
+                                </div>
+                                <div className="min-w-0">
+                                  {conn.profile_url ? (
+                                    <a
+                                      href={conn.profile_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-zinc-100 font-medium hover:text-[#4d8565] hover:underline inline-flex items-center gap-1"
+                                    >
+                                      {conn.name}
+                                      <ExternalLink size={10} className="opacity-50" />
+                                    </a>
+                                  ) : (
+                                    <span className="text-zinc-100 font-medium">{conn.name}</span>
+                                  )}
+                                  {conn.current_title && (
+                                    <span className="block text-[10px] text-zinc-500 truncate max-w-[180px]">{conn.current_title}</span>
+                                  )}
+                                </div>
+                              </div>
                             </td>
                             <td className="py-2 px-3 text-zinc-400">{conn.company || "-"}</td>
                             <td className="py-2 px-3 text-zinc-400 font-mono">
@@ -2024,7 +2084,7 @@ export default function Home() {
             {/* Full Name -- the single most load-bearing fact here: every draft
                 is written and signed in this name. Auto-filled from your resume,
                 always editable. */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+            <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-6">
               <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">Your Full Name</label>
               <p className="text-xs text-zinc-400 mb-3">
                 Drafts are written and signed in this name. Auto-detected from your resume when you upload one.
@@ -2041,10 +2101,10 @@ export default function Home() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
               {/* PDF Resume Drag Zone */}
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 flex flex-col justify-between">
+              <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 flex flex-col justify-between">
                 <div>
                   <h3 className="text-sm font-semibold text-white mb-2 flex items-center space-x-2">
-                    <FileText size={16} className="text-zinc-400" />
+                    <FileText size={16} className="text-[#4d8565]" />
                     <span>Upload Resume PDF</span>
                   </h3>
                   <p className="text-xs text-zinc-400 mb-6">
@@ -2077,9 +2137,9 @@ export default function Home() {
               </div>
 
               {/* LaTeX paste code box, moved up next to the resume upload */}
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 flex flex-col">
+              <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 flex flex-col">
                 <h3 className="text-sm font-semibold text-white mb-2 flex items-center space-x-2">
-                  <FileText size={16} className="text-emerald-400" />
+                  <FileText size={16} className="text-[#4d8565]" />
                   <span>Resume LaTeX Code Source</span>
                 </h3>
                 <p className="text-xs text-zinc-400 mb-4">
@@ -2096,9 +2156,9 @@ export default function Home() {
             </div>
 
             {/* Social Links */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+            <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-6">
               <h3 className="text-sm font-semibold text-white mb-2 flex items-center space-x-2">
-                <Link2 size={16} className="text-zinc-400" />
+                <Link2 size={16} className="text-[#4d8565]" />
                 <span>Social Links</span>
               </h3>
               <p className="text-xs text-zinc-400 mb-4">
@@ -2237,9 +2297,12 @@ export default function Home() {
             </div>
 
             {/* Job Search Details */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-4">
+            <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 space-y-4">
               <div>
-                <h3 className="text-sm font-semibold text-white mb-1">Job Search Details</h3>
+                <h3 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
+                  <Target size={16} className="text-[#4d8565]" />
+                  Job Search Details
+                </h3>
                 <p className="text-xs text-zinc-400">
                   Optional, but the model treats whatever's saved here as fact by default. Edit or clear any of these any time.
                 </p>
@@ -2282,9 +2345,12 @@ export default function Home() {
             </div>
 
             {/* Tone Guidelines */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-4">
+            <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 space-y-4">
               <div className="flex items-center justify-between flex-wrap gap-2">
-                <h3 className="text-sm font-semibold text-white">Outreach Tone Guidelines</h3>
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <MessageCircle size={16} className="text-[#4d8565]" />
+                  Outreach Tone Guidelines
+                </h3>
                 <button
                   onClick={() => setShowDefaultTone(v => !v)}
                   className="text-[10px] font-semibold text-zinc-400 hover:text-white cursor-pointer"
@@ -2384,7 +2450,7 @@ export default function Home() {
 
             {/* What the agent understood, so a wrong reading gets caught here
                 rather than silently shaping every message it writes. */}
-            <div className="bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-xl overflow-hidden">
+            <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl overflow-hidden">
               <button
                 onClick={() => setShowUnderstanding(v => !v)}
                 className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-white/[0.02] transition-colors cursor-pointer"
@@ -2532,7 +2598,7 @@ export default function Home() {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {/* Add Key Form */}
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 md:col-span-1 h-fit">
+              <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 md:col-span-1 h-fit">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-sm font-semibold text-white">Add API Key</h3>
                   <a
@@ -2631,7 +2697,7 @@ export default function Home() {
 
               {/* Keys List */}
               <div className="md:col-span-2 space-y-4">
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+                <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-6">
                   <h3 className="text-sm font-semibold text-white mb-4">Configured Key Workers</h3>
                   
                   <div className="space-y-3">
@@ -2690,7 +2756,7 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 text-xs text-zinc-400 space-y-2">
+                <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 text-xs text-zinc-400 space-y-2">
                   <h4 className="font-semibold text-white">How the QueueOrchestrator Pools Workers</h4>
                   <p>1. If you register 3 primary keys, 3 parallel WorkerThreads are dynamically allocated to run in the background. They concurrently retrieve and process outreach targets.</p>
                   <p>2. Standby keys act as failovers. If a primary worker hits a 429 rate limit error, the Orchestrator instantly replaces it with an available standby key and sets the primary key to cooldown for 3 minutes, preventing stops.</p>
@@ -2712,7 +2778,7 @@ export default function Home() {
               </p>
             </div>
 
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-6">
+            <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 space-y-6">
 
               {/* Telegram config */}
               <div className="space-y-4">
@@ -2720,6 +2786,11 @@ export default function Home() {
                   <h3 className="text-sm font-semibold text-white flex items-center space-x-2">
                     <Send size={16} className="text-blue-400" />
                     <span>Telegram Bot Integration</span>
+                    {!telegramEnabled && (
+                      <span className="text-[9px] font-semibold uppercase tracking-wider bg-white/5 text-zinc-500 border border-white/10 px-1.5 py-0.5 rounded">
+                        Disabled
+                      </span>
+                    )}
                   </h3>
                   <button
                     onClick={() => goToView("help-telegram")}
@@ -2730,6 +2801,9 @@ export default function Home() {
                 </div>
                 <p className="text-xs text-zinc-400">
                   Workers will send generated drafts straight to your private Telegram chat. Create a bot using `@BotFather` to get a token.
+                  {telegramEnabled
+                    ? " Disable it to keep drafts in the dashboard only."
+                    : " Disabled: drafts stay in the dashboard, nothing is sent to Telegram."}
                 </p>
 
                 <div>
@@ -2752,13 +2826,29 @@ export default function Home() {
                     className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-zinc-700"
                   />
                 </div>
-                <button
-                  onClick={handleTestTelegram}
-                  disabled={telegramTestLoading}
-                  className="bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 hover:text-white px-4 py-2.5 rounded border border-zinc-700 hover:border-zinc-600 transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  {telegramTestLoading ? "Testing..." : "Test Telegram Connection"}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleTestTelegram}
+                    disabled={telegramTestLoading}
+                    className="bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 hover:text-white px-4 py-2.5 rounded border border-zinc-700 hover:border-zinc-600 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {telegramTestLoading ? "Testing..." : "Test Telegram Connection"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      const next = !telegramEnabled;
+                      setTelegramEnabled(next);
+                      saveSetting("telegram_enabled", next ? "true" : "false");
+                    }}
+                    className={`text-xs font-semibold px-4 py-2.5 rounded border transition-colors cursor-pointer ${
+                      telegramEnabled
+                        ? "bg-rose-950/20 hover:bg-rose-950/30 text-rose-400 border-rose-900/40"
+                        : "bg-[#4d8565]/10 hover:bg-[#4d8565]/20 text-[#8fc7a4] border-[#4d8565]/30"
+                    }`}
+                  >
+                    {telegramEnabled ? "Disable" : "Enable"}
+                  </button>
+                </div>
                 {telegramTestMessage && (
                   <div className="text-xs text-emerald-400 bg-emerald-950/20 border border-emerald-900/30 rounded-lg p-3">
                     {telegramTestMessage}
@@ -2779,6 +2869,11 @@ export default function Home() {
                   <h3 className="text-sm font-semibold text-white flex items-center space-x-2">
                     <Send size={16} className="text-emerald-400" />
                     <span>Slack Integration</span>
+                    {!slackEnabled && (
+                      <span className="text-[9px] font-semibold uppercase tracking-wider bg-white/5 text-zinc-500 border border-white/10 px-1.5 py-0.5 rounded">
+                        Disabled
+                      </span>
+                    )}
                   </h3>
                   <button
                     onClick={() => goToView("help-slack")}
@@ -2789,6 +2884,9 @@ export default function Home() {
                 </div>
                 <p className="text-xs text-zinc-400">
                   Workers will post generated drafts to a Slack channel via an Incoming Webhook. Create one at <span className="font-mono text-zinc-300">api.slack.com/apps</span> &rarr; your app &rarr; Incoming Webhooks &rarr; Add New Webhook.
+                  {slackEnabled
+                    ? " Disable it to keep drafts in the dashboard only."
+                    : " Disabled: drafts stay in the dashboard, nothing is sent to Slack."}
                 </p>
 
                 <div>
@@ -2801,13 +2899,29 @@ export default function Home() {
                     className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-zinc-700"
                   />
                 </div>
-                <button
-                  onClick={handleTestSlack}
-                  disabled={slackTestLoading}
-                  className="bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 hover:text-white px-4 py-2.5 rounded border border-zinc-700 hover:border-zinc-600 transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  {slackTestLoading ? "Testing..." : "Test Slack Connection"}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleTestSlack}
+                    disabled={slackTestLoading}
+                    className="bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 hover:text-white px-4 py-2.5 rounded border border-zinc-700 hover:border-zinc-600 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {slackTestLoading ? "Testing..." : "Test Slack Connection"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      const next = !slackEnabled;
+                      setSlackEnabled(next);
+                      saveSetting("slack_enabled", next ? "true" : "false");
+                    }}
+                    className={`text-xs font-semibold px-4 py-2.5 rounded border transition-colors cursor-pointer ${
+                      slackEnabled
+                        ? "bg-rose-950/20 hover:bg-rose-950/30 text-rose-400 border-rose-900/40"
+                        : "bg-[#4d8565]/10 hover:bg-[#4d8565]/20 text-[#8fc7a4] border-[#4d8565]/30"
+                    }`}
+                  >
+                    {slackEnabled ? "Disable" : "Enable"}
+                  </button>
+                </div>
                 {slackTestMessage && (
                   <div className="text-xs text-emerald-400 bg-emerald-950/20 border border-emerald-900/30 rounded-lg p-3">
                     {slackTestMessage}
@@ -2895,7 +3009,7 @@ export default function Home() {
                 Getting a Telegram bot token &amp; chat ID
               </h2>
             </div>
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-4 text-xs text-zinc-300 leading-relaxed">
+            <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 space-y-4 text-xs text-zinc-300 leading-relaxed">
               <ol className="space-y-3 list-decimal list-inside">
                 <li>Open Telegram and search for <span className="font-mono text-zinc-100">@BotFather</span> (the official bot that creates other bots).</li>
                 <li>Send it <span className="font-mono text-zinc-100">/newbot</span> and follow the prompts: pick a display name, then a username ending in <span className="font-mono text-zinc-100">bot</span>.</li>
@@ -2926,7 +3040,7 @@ export default function Home() {
                 Getting a Slack Incoming Webhook URL
               </h2>
             </div>
-            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-4 text-xs text-zinc-300 leading-relaxed">
+            <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 space-y-4 text-xs text-zinc-300 leading-relaxed">
               <ol className="space-y-3 list-decimal list-inside">
                 <li>
                   Go to{" "}
@@ -2995,7 +3109,7 @@ export default function Home() {
                   {renderAnalyticsPanel()}
 
                   {/* Reply score: the headline number, plus what to do about it */}
-                  <div className="bg-white/[0.03] backdrop-blur-xl border border-white/10 rounded-xl p-5">
+                  <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-5">
                     <div className="flex items-start justify-between gap-4 flex-wrap">
                       <div>
                         <span className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">Reply Score</span>
@@ -3078,19 +3192,19 @@ export default function Home() {
 
                   {/* Top stat tiles */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                    <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-4">
                       <span className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block">Total Outreach</span>
                       <span className="text-2xl font-bold text-white">{analyticsData.total}</span>
                     </div>
-                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                    <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-4">
                       <span className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block">Replied</span>
                       <span className="text-2xl font-bold text-emerald-400">{byStatus["replied"] || 0}</span>
                     </div>
-                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                    <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-4">
                       <span className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block">10+ Yrs Experience</span>
                       <span className="text-2xl font-bold text-white">{analyticsData.experienced_10_plus}</span>
                     </div>
-                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                    <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-4">
                       <span className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block">Recruiters Contacted</span>
                       <span className="text-2xl font-bold text-white">{bySeniority["Recruiter"] || 0}</span>
                     </div>
@@ -3098,7 +3212,7 @@ export default function Home() {
 
                   {/* Pipeline breakdown + Seniority breakdown */}
                   <div className="grid sm:grid-cols-2 gap-4">
-                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                    <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-4">
                       <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-3">Pipeline Breakdown</h3>
                       <div className="space-y-1.5">
                         {Object.entries(byStatus).map(([status, count]) => (
@@ -3109,7 +3223,7 @@ export default function Home() {
                         ))}
                       </div>
                     </div>
-                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                    <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-4">
                       <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-3">Seniority Mix</h3>
                       <div className="space-y-1.5">
                         {Object.entries(bySeniority).map(([seniority, count]) => (
@@ -3123,7 +3237,7 @@ export default function Home() {
                   </div>
 
                   {/* Reply-time analysis */}
-                  <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                  <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-4">
                     <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-3">Reply-Time Analysis</h3>
                     <p className="text-[10px] text-zinc-500 mb-3">
                       Only counts connections marked "Sent" through the funnel stage selector, since that's what timestamps the clock start.
@@ -3149,7 +3263,7 @@ export default function Home() {
                   </div>
 
                   {/* Filterable people list */}
-                  <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                  <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
                       <h3 className="text-xs font-bold text-white uppercase tracking-wider">Everyone ({filteredPeople.length})</h3>
                       <div className="flex flex-wrap gap-2">
@@ -3368,7 +3482,7 @@ export default function Home() {
 
               <div className="grid grid-cols-3 gap-2 pt-2 border-t border-zinc-900">
                 {/* Decision Maker Badge */}
-                <div className="bg-zinc-900 border border-zinc-800 rounded p-2 text-center">
+                <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded p-2 text-center">
                   <span className="text-[8px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">Decision Maker</span>
                   <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                     selectedConnection.is_decision_maker === "yes" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
@@ -3380,7 +3494,7 @@ export default function Home() {
                 </div>
 
                 {/* Referral Potential Badge */}
-                <div className="bg-zinc-900 border border-zinc-800 rounded p-2 text-center">
+                <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded p-2 text-center">
                   <span className="text-[8px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">Referral Potential</span>
                   <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                     selectedConnection.referral_potential === "high" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
@@ -3399,7 +3513,7 @@ export default function Home() {
                     hiringBadge = pIntel.hiring_badge_status || "OFF";
                   } catch(e) {}
                   return (
-                    <div className="bg-zinc-900 border border-zinc-800 rounded p-2 text-center">
+                    <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded p-2 text-center">
                       <span className="text-[8px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">Hiring Badge</span>
                       <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                         hiringBadge === "ON" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 animate-pulse" :
@@ -3471,7 +3585,7 @@ export default function Home() {
                   ))}
                 </div>
 
-                <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3 text-xs space-y-3">
+                <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-lg p-3 text-xs space-y-3">
                   {intelTab === "profile" && (() => {
                     try {
                       const data = JSON.parse(selectedConnection.profile_intelligence || "{}");
@@ -3717,7 +3831,7 @@ export default function Home() {
                 </div>
 
                 {/* Draft text Area */}
-                <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 relative">
+                <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-lg p-4 relative">
                   <p className="text-xs text-zinc-200 whitespace-pre-wrap leading-relaxed font-mono">
                     {selectedVariant === "referral" && (selectedConnection.generated_outreach_referral || selectedConnection.generated_outreach_short)}
                     {selectedVariant === "coffee" && (selectedConnection.generated_outreach_coffee || selectedConnection.generated_outreach_warm)}
@@ -3830,7 +3944,7 @@ export default function Home() {
               </div>
 
               {/* Add Log Box */}
-              <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3 space-y-3">
+              <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-lg p-3 space-y-3">
                 <textarea 
                   value={newLogMessage}
                   onChange={e => setNewLogMessage(e.target.value)}
@@ -3909,7 +4023,7 @@ export default function Home() {
 
 
                 {suggestedReply && (
-                  <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 relative">
+                  <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-lg p-4 relative">
                     <span className="text-[9px] text-emerald-400 font-semibold block mb-1">Suggested Follow-up</span>
                     <p className="text-xs text-zinc-200 leading-relaxed whitespace-pre-wrap">{suggestedReply}</p>
                     <button 
@@ -3976,7 +4090,7 @@ export default function Home() {
       {/* 4. ADD OUTREACH TARGET DIALOG MODAL */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-lg w-full max-h-[90vh] flex flex-col shadow-2xl relative">
+          <div className="bg-zinc-950/95 backdrop-blur-xl border border-white/10 rounded-2xl max-w-lg w-full max-h-[90vh] flex flex-col shadow-2xl relative">
             <h3 className="text-base font-bold text-white p-6 pb-4 shrink-0">Add Outreach Target Candidate</h3>
 
             <form onSubmit={handleAddConnection} className="space-y-4 overflow-y-auto px-6 pb-6">

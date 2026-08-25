@@ -341,6 +341,14 @@ class QueueOrchestrator:
                 telegram_chat_id = settings.get("telegram_chat_id")
                 slack_webhook_url = settings.get("slack_webhook_url")
 
+                # A saved token/webhook stays saved even when disabled, so
+                # re-enabling later doesn't require re-entering it.
+                if settings.get("telegram_enabled", "true") == "false":
+                    telegram_token = None
+                    telegram_chat_id = None
+                if settings.get("slack_enabled", "true") == "false":
+                    slack_webhook_url = None
+
                 # Default pacing is 15 minutes, but user can change it
                 try:
                     pacing_min = float(settings.get("pacing_interval_minutes", 15.0))
