@@ -1238,10 +1238,16 @@ def ask_analytics(
 @app.post("/api/connections/{connection_id}/generate-email")
 def generate_email_draft(
     connection_id: int,
+    body: schemas.EmailDraftRequest = schemas.EmailDraftRequest(),
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Writes a real outreach email (subject + body) for this person."""
+    """
+    Writes a real outreach email (subject + body) for this person, in one of
+    a few real-world situations the user picks (cold, already messaged and
+    waiting, already messaged and replied), plus optional style modifiers
+    (referral ask, punchier opener) that layer on top.
+    """
     conn = db.query(models.Connection).filter(
         models.Connection.id == connection_id,
         models.Connection.user_id == current_user.id
@@ -1259,6 +1265,24 @@ def generate_email_draft(
     settings_records = db.query(models.Setting).filter(models.Setting.user_id == current_user.id).all()
     settings = {s.key: s.value for s in settings_records if s.value}
 
+    conversation_context = ""
+    if body.contact_status == "messaged_replied":
+        logs = db.query(models.InteractionLog).filter(
+            models.InteractionLog.connection_id == connection_id
+        ).order_by(models.InteractionLog.created_at.asc()).all()
+        transcript_lines = [
+            f"{'You' if log.sender == 'user' else conn.name}: {log.message}"
+            for log in logs
+            if log.message and log.message != "[Conversation screenshot uploaded]"
+        ]
+        if conn.conversation_verdict:
+            transcript_lines.append(
+                f"[Read on how this is going: {conn.conversation_verdict}"
+                + (f", {conn.conversation_verdict_reason}" if conn.conversation_verdict_reason else "")
+                + "]"
+            )
+        conversation_context = "\n".join(transcript_lines) or "No transcript text was saved, only a screenshot. Write generally warm and continuing, without quoting specifics you don't have."
+
     result = generate_outreach_email(
         api_key=api_key_record.key_value,
         twin_profile=compile_twin_agent_profile(db, current_user.id),
@@ -1274,6 +1298,9 @@ def generate_email_draft(
         },
         tone_examples=settings.get("tone_examples", ""),
         sender_name=get_sender_name(db, current_user.id),
+        contact_status=body.contact_status,
+        style_modifiers=body.style_modifiers,
+        conversation_context=conversation_context,
     )
 
     conn.generated_email_subject = result["subject"]

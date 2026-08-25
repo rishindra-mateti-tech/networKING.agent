@@ -1,7 +1,7 @@
 import re
 import json
 import os
-from typing import Optional
+from typing import List, Optional
 from google import genai
 from google.genai import types
 from google.genai.errors import APIError
@@ -858,6 +858,96 @@ def generate_thread_followup(api_key: str, twin_profile: str, candidate_profile:
         return f"Error generating follow-up: {str(e)}"
 
 
+def _clean_email_placeholders(text: str, candidate_name: str, sender_name: str) -> str:
+    """
+    Safety net for the rare case (usually a near-empty TwinAgent profile) where
+    the model falls back to a bracketed placeholder instead of a real name,
+    since a literal "[Your Name]" reaching a draft the user sends is worse
+    than the plain fallback name already computed in Python.
+    """
+    if not text:
+        return text
+    text = re.sub(r'\[\s*(Candidate\s*)?Name\s*\]', candidate_name, text, flags=re.IGNORECASE)
+    text = re.sub(r'\[\s*Your\s*Name\s*\]', sender_name, text, flags=re.IGNORECASE)
+    text = re.sub(r'\[\s*Sender\s*Name\s*\]', sender_name, text, flags=re.IGNORECASE)
+    return text
+
+
+CONTACT_STATUS_STANDARD = "standard"
+CONTACT_STATUS_COLD = "cold"
+CONTACT_STATUS_MESSAGED_NO_REPLY = "messaged_no_reply"
+CONTACT_STATUS_MESSAGED_REPLIED = "messaged_replied"
+
+MODIFIER_REFERRAL = "referral"
+MODIFIER_PUNCHY_OPENER = "punchy_opener"
+
+
+def _contact_status_block(contact_status: str, sender_name: str) -> str:
+    """
+    The one thing about a cold email that changes everything else: has this
+    person heard from the sender before, and how did that go. Each branch
+    below tells the model a different true thing to open with instead of
+    guessing at a shared history that may or may not exist.
+    """
+    if contact_status == CONTACT_STATUS_MESSAGED_REPLIED:
+        return (
+            "SITUATION: THEY ALREADY REPLIED TO YOU ON LINKEDIN.\n"
+            "This is not a cold email. You are continuing a conversation that already started on LinkedIn, "
+            "moving it to email because it deserves more room than a DM thread gives it. Skip the formal "
+            "self-introduction entirely, they already know who you are. Open by picking up a specific, real "
+            "thread from what they actually said in the conversation below, not a generic 'great chatting' "
+            "line. Reference one concrete thing they said or asked, and build the email on it. This should "
+            "read like an email from someone they already have a rapport with, warmer and more specific than "
+            "a first-touch cold email, never a repeat of the introduction they already got.\n\n"
+        )
+    if contact_status == CONTACT_STATUS_MESSAGED_NO_REPLY:
+        return (
+            "SITUATION: YOU MESSAGED THEM ON LINKEDIN AND THEY HAVEN'T REPLIED YET.\n"
+            "Do not write this as a follow-up nag or imply they owe you a response, LinkedIn requests get "
+            "lost or ignored for reasons that have nothing to do with interest. Acknowledge it in one short, "
+            "low-key line, not an apology and not a guilt trip ('figured I'd try email too, in case LinkedIn "
+            "buried it' is the right register, not 'following up on my message'). Then this becomes a normal "
+            "cold email: same rules as a first-touch email otherwise, lead with a real hook, self-intro in "
+            "one line after. Treat email as a second, lower-pressure channel, not a repeat of the same pitch "
+            "with more urgency.\n\n"
+        )
+    if contact_status == CONTACT_STATUS_COLD:
+        return (
+            "SITUATION: NO PRIOR CONTACT OF ANY KIND. THIS IS THE FIRST TIME YOU ARE REACHING THIS PERSON.\n"
+            "Do not reference LinkedIn, a prior message, or any shared history, because none exists. Write it "
+            "as a genuine first introduction.\n\n"
+        )
+    # CONTACT_STATUS_STANDARD: no explicit framing either way, the default baseline.
+    return ""
+
+
+def _style_modifier_blocks(style_modifiers: List[str]) -> str:
+    blocks = []
+    if MODIFIER_REFERRAL in style_modifiers:
+        blocks.append(
+            "STYLE REQUIREMENT: THE ASK IN THIS EMAIL MUST BE A REFERRAL, NOT A QUESTION.\n"
+            "The user has explicitly chosen a referral ask for this email. This is not optional and it "
+            "overrides every other instruction about what the ask should be, including the DECIDED STRATEGY "
+            "section's 'Do' if that section suggests a different kind of ask (like a technical question), "
+            "and the general guidance elsewhere about not asking founders or senior leaders for referrals. "
+            "If a specific open role or team is known from the research, name it. If not, ask generally for "
+            "a referral or introduction into the company for roles matching the sender's actual background. "
+            "The hook (observation or question) still opens the email and earns the ask, but the email must "
+            "end by actually asking them to refer or introduce the sender, in one plain sentence, with a "
+            "real out ('totally fine if that's not something you can do').\n\n"
+        )
+    if MODIFIER_PUNCHY_OPENER in style_modifiers:
+        blocks.append(
+            "STYLE REQUIREMENT: PUNCHY, EYE-CATCHING OPENING LINE.\n"
+            "The first sentence should have more energy than the usual measured opener, a bold claim, a "
+            "sharp specific detail, an unexpected angle, something that makes the reader's eyebrows go up "
+            "for a second. Punchy does not mean gimmicky or clickbait, it still has to be true and specific "
+            "to this person, it just lands with more force than a polite observation. Keep everything else "
+            "(no em dashes, no exclamation marks, honesty rules) exactly as strict.\n\n"
+        )
+    return "".join(blocks)
+
+
 def generate_outreach_email(
     api_key: str,
     twin_profile: str,
@@ -867,6 +957,9 @@ def generate_outreach_email(
     bridge_data: dict,
     tone_examples: str = "",
     sender_name: str = "the user",
+    contact_status: str = CONTACT_STATUS_STANDARD,
+    style_modifiers: Optional[List[str]] = None,
+    conversation_context: str = "",
 ) -> dict:
     """
     Writes a real outreach EMAIL (subject + body), distinct from the short-form
@@ -874,7 +967,17 @@ def generate_outreach_email(
     that has to earn the open, and a reader who is likely skimming in a crowded
     inbox. Draws its facts from the TwinAgent profile, so when the user's resume
     is re-uploaded, future emails automatically reflect the newer background.
+
+    `contact_status` picks which real-world situation this email is actually
+    being sent into (cold, already messaged and ignored, already messaged and
+    replied), since that changes what's honest to say in the opening lines.
+    `style_modifiers` are additive choices on top of that (asking for a
+    referral, a punchier opening) the user can pick regardless of contact
+    status. Both are surfaced as an explicit picker in the UI rather than
+    generating every combination up front, since most of them are irrelevant
+    to any given person.
     """
+    style_modifiers = style_modifiers or []
     try:
         profile_intel = json.loads(bridge_data.get("profile_intelligence") or "{}")
         company_intel = json.loads(bridge_data.get("company_intelligence") or "{}")
@@ -884,9 +987,10 @@ def generate_outreach_email(
         profile_intel, company_intel, strategy_intel, personalization = {}, {}, {}, {}
 
     context_summary = bridge_data.get("context_summary") or ""
+    skip_formal_intro = contact_status == CONTACT_STATUS_MESSAGED_REPLIED
 
     system_instruction = (
-        "You write cold outreach emails that get replies, in the voice of the user described below. "
+        "You write outreach emails that get replies, in the voice of the user described below. "
         "You are not a marketing copywriter and you are not an assistant announcing itself. You are "
         "writing as this person, to another person, one human to another.\n\n"
 
@@ -895,37 +999,45 @@ def generate_outreach_email(
         "have consciously decided to read anything. Write for that moment, not for a careful reader who "
         "does not exist.\n\n"
 
-        "THE FIRST SENTENCE IS THE ENTIRE EMAIL.\n"
-        "Hard rule: it must NOT begin by introducing the sender. 'Hi X, I'm Y, a student at Z' is the most "
-        "common cold-email opening in existence and it asks the reader to care about a stranger before "
-        "being given any reason to. Who you are goes in the SECOND paragraph, in one line, once you have "
-        "earned it.\n\n"
+        + _contact_status_block(contact_status, sender_name) +
 
-        "The opening line must do one of these, chosen by whichever the research actually supports:\n"
+        ("HOW TO OPEN THE EMAIL.\n"
+        "Lead with a brief, natural self-introduction, one sentence, stated the way a person actually talks "
+        "about themselves, not a resume line and not the tired 'Hi X, I'm Y, a student at Z' template. State "
+        "who you are and what you actually do right now, plainly, then move immediately into the real reason "
+        "you're writing. The self-intro earns its place by being short and specific (their actual current "
+        "role and one concrete thing they work on), never a list of credentials.\n\n"
+        "Immediately after that one line, the email needs a real hook, chosen from whichever of these the "
+        "research actually supports:\n"
         "  1. THE SPECIFIC OBSERVATION. Name a real technical decision, tradeoff, or piece of work they "
         "own, precise enough that it could not be sent to anyone else. Specificity is the proof a human "
         "wrote this, and it flatters without complimenting.\n"
-        "  2. THE QUESTION ONLY THEY CAN ANSWER. Open with a genuine, concrete question about how their "
-        "system or team handles something. People feel a pull to answer a question they are uniquely "
-        "qualified for. It costs them one sentence to reply, which is the point.\n"
+        "  2. THE QUESTION ONLY THEY CAN ANSWER. A genuine, concrete question about how their system or "
+        "team handles something. People feel a pull to answer a question they are uniquely qualified for. "
+        "It costs them one sentence to reply, which is the point.\n"
         "  3. THE NOTICED PATTERN. Point out something real about their trajectory or their company's "
         "direction that shows you thought about it, not just read a title.\n"
-        "  4. THE HONEST COLD OPEN. When the research is genuinely thin, say the true thing in a plain, "
+        "  4. THE HONEST OPEN. When the research is genuinely thin, say the true thing in a plain, "
         "slightly disarming way and get straight to the ask. Sincerity beats manufactured familiarity, "
-        "and a short honest email outperforms a padded one.\n\n"
+        "and a short honest email outperforms a padded one.\n\n") if not skip_formal_intro else
+        ("HOW TO OPEN THE EMAIL.\n"
+        "No self-introduction, covered above: they already know who you are from the LinkedIn thread. Open "
+        "directly on the specific thing from that conversation you're picking back up.\n\n") +
 
-        "Leave one thread hanging. The best cold emails create a small, honest curiosity gap: a question "
-        "posed and not answered, a specific problem named and not resolved. Do not explain everything. "
-        "Give them a reason to want to write back, not a document to file away.\n\n"
+        "Leave one thread hanging. The best emails create a small, honest curiosity gap: a question posed "
+        "and not answered, a specific problem named and not resolved. Do not explain everything. Give them "
+        "a reason to want to write back, not a document to file away.\n\n"
+
+        + _style_modifier_blocks(style_modifiers) +
 
         "BE WARM AND LOW-PRESSURE, NOT CLEVER.\n"
-        "Specific does not mean sharp, and confident does not mean pushy. This email is a stranger asking "
-        "another person for a small piece of their time, and it should feel like that: genuine, a little "
-        "humble, easy to say no to. Two things make that land. First, give them a real out, in their own "
-        "words, near the ask ('no worries if you're slammed', 'totally fine if not'). Second, never imply "
-        "they owe you a reply, never guilt ('I know you're busy but...' used as leverage), and never chase "
-        "a clever line at the cost of sounding like a person. If a sentence would make you wince to receive "
-        "it from a stranger, rewrite it plainer.\n"
+        "Specific does not mean sharp, and confident does not mean pushy. This email is one person asking "
+        "another for a small piece of their time, and it should feel like that: genuine, a little humble, "
+        "easy to say no to. Two things make that land. First, give them a real out, in their own words, "
+        "near the ask ('no worries if you're slammed', 'totally fine if not'). Second, never imply they owe "
+        "you a reply, never guilt ('I know you're busy but...' used as leverage), and never chase a clever "
+        "line at the cost of sounding like a person. If a sentence would make you wince to receive it from "
+        "a stranger, rewrite it plainer.\n"
         "Warmth is not flattery. Do not compliment them to buy goodwill. Being specific about their actual "
         "work, and being brief with their time, IS the respect.\n\n"
 
@@ -945,7 +1057,6 @@ def generate_outreach_email(
         "different things, the email feels stitched together and gets closed.\n"
         "  3 to 7 words, sentence case, concrete. Never use: 'Exciting Opportunity', 'Quick Question', "
         "'Reaching Out', 'Connecting', 'Introduction', exclamation marks, or emoji.\n"
-        "- One line of credibility, maximum, and only the part relevant to what you just said. Not a resume.\n"
         "- The ask must be small, singular, and answerable in two sentences without scheduling anything. "
         "One ask per email.\n"
         "- 80 to 130 words in the body. Shorter than feels comfortable. If it does not fit on a phone "
@@ -981,7 +1092,6 @@ def generate_outreach_email(
         "- No rhetorical filler questions used as a paragraph transition ('Ever wonder how...', 'What if...'). "
         "The one real question in the email is the ask itself, not a warm-up act.\n"
         "- No bullet points, no headers, no bold. This is an email between two people, not a deck.\n"
-        "- Do not open with the user's own resume. Lead with them, then earn the right to say who you are in one line.\n"
         "- Sign off plainly: 'Thanks,' or 'Best,' then the name. Nothing more elaborate.\n\n"
 
         "HANDLING MISSING DATA:\n"
@@ -989,7 +1099,7 @@ def generate_outreach_email(
         "write the word 'Unknown' into the email, and never reference a field that says it or apologize for not "
         "knowing something ('I couldn't find much about your role, but...'). Silently write around it: build the "
         "email only from what the profile actually established. If most fields are Unknown, that's a signal to "
-        "use the HONEST COLD OPEN and keep the email short, not a gap to paper over with invented specifics.\n\n"
+        "use the HONEST OPEN and keep the email short, not a gap to paper over with invented specifics.\n\n"
 
         "HONESTY RULES, THESE OVERRIDE EVERYTHING ELSE:\n"
         "- Only state facts about the user that appear in the profile provided. Never invent a job, a school, a "
@@ -1002,57 +1112,58 @@ def generate_outreach_email(
         "email is explicitly and specifically about sponsorship. It's background context for judging what ask "
         "is appropriate, not something to volunteer in a cold email the recipient didn't ask about.\n\n"
 
-        "CALIBRATION, showing the difference the opening line makes. The sender's status in these two "
-        "examples ('a CS Master's student') is illustrative only, it is NOT what to write. Always pull the "
-        "sender's actual current status from the WHO IS WRITING THIS EMAIL section below, not from these "
+        "CALIBRATION, showing what a good self-intro plus hook looks like together. The sender's status in "
+        "these examples ('a CS Master's student') is illustrative only, it is NOT what to write. Always pull "
+        "the sender's actual current status from the WHO IS WRITING THIS EMAIL section below, not from these "
         "examples, since that profile changes over time (e.g. they may have since graduated or changed roles).\n\n"
 
-        "WEAK, because it leads with the sender and could be sent to anyone:\n"
+        "WEAK, because the self-intro is a résumé line and the rest is generic:\n"
         "  Subject: building developer tools at console\n"
         f"  'Hi Adithya, I'm {sender_name}, [whatever the sender's current status actually is] and a software "
         "engineer building full-stack AI systems at [their actual company]. I noticed your work spanning native iOS and web "
         "frameworks like React and Vue while building developer tools at Console...'\n"
-        "  Why it fails: the first fourteen words are about the sender. The observation is a list of "
-        "technologies scraped from a profile, not a thought. Nothing here is unanswerable, so nothing "
+        "  Why it fails: the self-intro reads like a LinkedIn headline, and the observation that follows is a "
+        "list of technologies scraped from a profile, not a thought. Nothing here is unanswerable, so nothing "
         "gets answered. And the subject just restates the recipient's own job back at them, which tells "
         "them nothing they do not know and previews none of the actual question below.\n\n"
 
-        "STRONG, opening on a question only this person can answer, with a subject that previews it:\n"
+        "STRONG, a short natural self-intro immediately followed by a question only this person can answer, "
+        "with a subject that previews it:\n"
         "  Subject: where you draw the shared-logic line\n"
-        "  'Hi Adithya, when you're shipping a developer tool across native iOS and web at the same time, "
-        "where do you draw the line on shared logic? I keep landing on duplicating it and regretting it "
-        "about a month later.\n\n"
-        "  [One line on the sender's actual current status, pulled from the profile below], and I've been "
-        "building a repo-analysis tool that ran into the same wall from the backend side.\n\n"
+        f"  'Hi Adithya, I'm {sender_name}, [one plain clause on the sender's actual current status, pulled "
+        "from the profile below]. When you're shipping a developer tool across native iOS and web at the "
+        "same time, where do you draw the line on shared logic? I keep landing on duplicating it and "
+        "regretting it about a month later.\n\n"
         "  If you have a minute, I'd genuinely like to know how Console handles it. No worries if not.'\n"
-        "  Why it works: the first sentence is a real technical question aimed at their actual daily "
-        "problem. It admits something ('regretting it') which reads human. The credential is one line and "
-        "arrives only after the hook. The ask costs them two sentences. And the subject is the headline of "
-        "that same question, so opening the email delivers exactly what the subject promised.\n\n"
+        "  Why it works: the self-intro is one plain clause, not a pitch, and it immediately hands off to a "
+        "real technical question aimed at their actual daily problem. It admits something ('regretting it') "
+        "which reads human. The ask costs them two sentences. And the subject is the headline of that same "
+        "question, so opening the email delivers exactly what the subject promised.\n\n"
 
         "The STRONG example above is an engineer-to-engineer email. The register has to shift with who is "
-        "receiving it, and the two below show how. Same rules throughout: they lead with the recipient, the "
-        "credential is one line, the ask is small, and there is a real out at the end. Only the substance of "
-        "the ask changes. As above, every bracketed part is filled from the sender's actual profile, never "
-        "from these examples.\n\n"
+        "receiving it, and the two below show how. Same rules throughout: a short honest self-intro, then "
+        "the recipient, the ask is small, and there is a real out at the end. Only the substance of the ask "
+        "changes. As above, every bracketed part is filled from the sender's actual profile, never from "
+        "these examples.\n\n"
 
         "RECRUITER / TALENT. They are not going to debate architecture with you, so do not ask them to. "
         "Be concrete about what you are and what you want, and make the reply cheap:\n"
         "  Subject: whether the [role type] pipeline is open\n"
-        "  'Hi [name], are you still filling [specific role or team they posted about], or has that closed?\n\n"
-        "  [One line: sender's actual current status and the single most relevant thing about them.] If it's "
-        "open I'll send a proper application. If it's not, I'd rather not clog your inbox.\n\n"
+        f"  'Hi [name], I'm {sender_name}, [one plain clause on current status]. Are you still filling "
+        "[specific role or team they posted about], or has that closed? If it's open I'll send a proper "
+        "application. If it's not, I'd rather not clog your inbox.\n\n"
         "  Either way, thanks. No worries if you're buried.'\n"
         "  Why it works: it asks one binary question they can answer in four words, it respects that their "
         "inbox is the worst inbox in the company, and it does not pretend to be a peer conversation.\n\n"
 
-        "FOUNDER / VP / DIRECTOR. Do not ask for a meeting, a coffee chat, or a referral. Their scarcest "
-        "resource is attention, and a meeting request from a stranger is the most expensive thing you can "
-        "ask for. Ask one sharp question about a decision they actually made:\n"
+        "FOUNDER / VP / DIRECTOR. Unless the referral style requirement above says otherwise, do not ask for "
+        "a meeting, a coffee chat, or a referral. Their scarcest resource is attention, and a meeting request "
+        "from a stranger is the most expensive thing you can ask for. Ask one sharp question about a decision "
+        "they actually made:\n"
         "  Subject: the [specific bet or decision] call\n"
-        "  'Hi [name], you moved [specific thing their company did] before most people in the space did. Was "
-        "that a conviction call or did the constraints just force it?\n\n"
-        "  [One line on the sender's actual current status and why this matters to them specifically.]\n\n"
+        f"  'Hi [name], I'm {sender_name}, [one plain clause on current status and why this matters to them "
+        "specifically]. You moved [specific thing their company did] before most people in the space did. "
+        "Was that a conviction call or did the constraints just force it?\n\n"
         "  Genuinely curious, and no reply needed if you're heads-down.'\n"
         "  Why it works: senior people will answer a question about their own judgment when they will ignore "
         "everything else, because it is the one thing nobody else can answer. It asks for a sentence, not a "
@@ -1061,6 +1172,13 @@ def generate_outreach_email(
         "Pick the register that matches the recipient's actual seniority from the profile below. Match the "
         "STRONG pattern. Never the WEAK one."
     )
+
+    conversation_section = ""
+    if conversation_context:
+        conversation_section = f"""
+    YOUR PRIOR LINKEDIN CONVERSATION WITH THEM, USE THIS AS REAL SHARED HISTORY:
+    {conversation_context}
+    """
 
     prompt = f"""
     WHO IS WRITING THIS EMAIL (the user). Every factual claim about the sender must come from here:
@@ -1084,32 +1202,35 @@ def generate_outreach_email(
 
     THE DECIDED STRATEGY FOR THIS PERSON:
     {context_summary}
-    - Do: {strategy_intel.get("dos")}
+    - Do: {strategy_intel.get("dos")}{" (IGNORE this if it conflicts with the referral style requirement above, the referral wins)" if MODIFIER_REFERRAL in style_modifiers else ""}
     - Do NOT: {strategy_intel.get("donts")}
 
     SPECIFIC HOOKS WORTH USING:
     - {personalization.get("conversation_hooks")}
     - Motivation / career pattern: {personalization.get("motivation_hooks")}
     - Avoid mentioning: {personalization.get("avoid_points")}
-
-    Write one email. Respect the strategy above, especially the DO NOTs. Adjust the ask to their seniority:
-    a founder or VP gets a thoughtful question about their direction and no favor request; a recruiter gets a
-    clear statement of what role is being targeted and an offer to send a resume; an engineer gets a specific
-    technical question they would enjoy answering.
+    {conversation_section}
+    Write one email. Respect the strategy above, especially the DO NOTs, UNLESS the referral style requirement
+    above is active, in which case the ask is the referral and this paragraph's guidance about what kind of ask
+    fits their seniority does not apply, the referral requirement wins regardless of seniority or role. If the
+    referral requirement is not active, adjust the ask to their seniority instead: a founder or VP gets a
+    thoughtful question about their direction and no favor request; a recruiter gets a clear statement of what
+    role is being targeted and an offer to send a resume; an engineer gets a specific technical question they
+    would enjoy answering.
 
     Before you write, decide the single most specific true thing you know about this person, and build the
-    opening line on that. If the only honest answer is "not much", use the honest cold open and keep the
-    whole email under 70 words rather than padding it with invented familiarity.
+    hook on that. If the only honest answer is "not much", use the honest open and keep the whole email under
+    70 words rather than padding it with invented familiarity.
 
     Write the body first, then write the subject from whatever the body actually ended up asking.
 
     Then check your draft against these, and rewrite if any fail:
-      - Does the first sentence mention the sender? If yes, rewrite it.
-      - Could this exact opening line be sent to a different person unchanged? If yes, it is not specific enough.
+      - {"Does the email skip a formal self-introduction, since they already know who you are from the LinkedIn thread? If it re-introduces the sender, rewrite it." if skip_formal_intro else "Is there a short, natural one-line self-introduction near the start, before the hook? If the email jumps straight into the hook with no self-intro, or the self-intro reads like a résumé line, rewrite it."}
+      - Could this exact hook be sent to a different person unchanged? If yes, it is not specific enough.
       - Does the subject preview the specific question the body asks, rather than describing the recipient's
         job or company? If someone read only the subject, could they guess what is being asked?
-      - Do the subject and the first sentence point at the same thing? If they are about different topics,
-        rewrite the subject to match the body.
+      - Do the subject and the hook point at the same thing? If they are about different topics, rewrite the
+        subject to match the body.
       - Is there a real question or unresolved thread that makes replying feel natural?
       - Is the body under 130 words?
       - Are there any em dashes? There must be none.
@@ -1117,8 +1238,7 @@ def generate_outreach_email(
         data for? If yes, rewrite that sentence using only confirmed facts.
       - Are there any exclamation marks? There must be none.
       - Does the ask give them an easy, genuine out, in plain words? If refusing would feel awkward, add one.
-      - Does the register match their seniority (peer question / recruiter binary / senior judgment call), and
-        does it avoid asking a founder, VP or director for a meeting or referral?
+      - {"Is the actual ask a referral or introduction, in plain words, not a technical question or anything else? If the email ends on a question instead of an actual referral ask, rewrite the ending so it asks for the referral." if MODIFIER_REFERRAL in style_modifiers else "Does the register match their seniority (peer question / recruiter binary / senior judgment call)?"}
       - Is their name used anywhere after the greeting? Remove it.
       - Is every sentence one a real person would actually say out loud? Rewrite any that isn't.
       - Does it read as a person with a point of view rather than a flawless neutral assistant?
@@ -1133,8 +1253,12 @@ def generate_outreach_email(
         cleaned_output = _strip_json_codeblock(raw_output)
         data = json.loads(cleaned_output)
         return {
-            "subject": clean_unicode_text(data.get("subject", "")).strip(),
-            "body": clean_unicode_text(data.get("body", "")).strip(),
+            "subject": _clean_email_placeholders(
+                clean_unicode_text(data.get("subject", "")).strip(), candidate_name, sender_name
+            ),
+            "body": _clean_email_placeholders(
+                clean_unicode_text(data.get("body", "")).strip(), candidate_name, sender_name
+            ),
         }
     except Exception as e:
         print(f"Error generating outreach email: {e}")

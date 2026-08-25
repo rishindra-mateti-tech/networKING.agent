@@ -297,6 +297,12 @@ export default function Home() {
   const [emailDraftLoadingId, setEmailDraftLoadingId] = useState<number | null>(null);
   const [expandedUploadRow, setExpandedUploadRow] = useState<number | null>(null);
   const [uploadsRowScreenshotLoadingId, setUploadsRowScreenshotLoadingId] = useState<number | null>(null);
+
+  // Email draft style picker -- which real-world situation this email is for,
+  // set once per generation instead of generating every combination up front.
+  const [emailDraftModalConn, setEmailDraftModalConn] = useState<any | null>(null);
+  const [emailContactStatus, setEmailContactStatus] = useState("standard");
+  const [emailStyleModifiers, setEmailStyleModifiers] = useState<string[]>([]);
   const uploadsScreenshotInputRef = useRef<HTMLInputElement>(null);
   const [uploadsScreenshotTargetId, setUploadsScreenshotTargetId] = useState<number | null>(null);
 
@@ -1004,10 +1010,17 @@ export default function Home() {
     }
   };
 
-  const handleGenerateEmail = async (connId: number) => {
+  const handleGenerateEmail = async (
+    connId: number,
+    draftOptions?: { contact_status: string; style_modifiers: string[] }
+  ) => {
     setEmailDraftLoadingId(connId);
     try {
-      const res = await fetchWithAuth(`/api/connections/${connId}/generate-email`, { method: "POST" });
+      const res = await fetchWithAuth(`/api/connections/${connId}/generate-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draftOptions || { contact_status: "standard", style_modifiers: [] }),
+      });
       const data = await res.json();
       if (res.ok) {
         fetchConnections();
@@ -1020,6 +1033,23 @@ export default function Home() {
     } finally {
       setEmailDraftLoadingId(null);
     }
+  };
+
+  // Opens the draft-style picker instead of generating immediately, since which
+  // of the situations below is real changes what's honest to say in the email.
+  const openEmailDraftPicker = (conn: any) => {
+    setEmailContactStatus(conn.conversation_verdict ? "messaged_replied" : "standard");
+    setEmailStyleModifiers([]);
+    setEmailDraftModalConn(conn);
+  };
+
+  const confirmGenerateEmail = () => {
+    if (!emailDraftModalConn) return;
+    handleGenerateEmail(emailDraftModalConn.id, {
+      contact_status: emailContactStatus,
+      style_modifiers: emailStyleModifiers,
+    });
+    setEmailDraftModalConn(null);
   };
 
   // Hands the finished draft off to whichever mail client the user prefers, with
@@ -1943,7 +1973,7 @@ export default function Home() {
                                 </button>
                                 {conn.candidate_email && (
                                   <button
-                                    onClick={() => handleGenerateEmail(conn.id)}
+                                    onClick={() => openEmailDraftPicker(conn)}
                                     disabled={emailDraftLoadingId === conn.id}
                                     title="Draft an outreach email"
                                     className="p-1.5 rounded bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-400 hover:text-white transition-colors cursor-pointer disabled:opacity-40"
@@ -1989,7 +2019,7 @@ export default function Home() {
                                             <Mail size={10} /> Open in {emailClientPreference === "outlook" ? "Outlook" : emailClientPreference === "gmail" ? "Gmail" : "mail app"}
                                           </button>
                                           <button
-                                            onClick={() => handleGenerateEmail(conn.id)}
+                                            onClick={() => openEmailDraftPicker(conn)}
                                             disabled={emailDraftLoadingId === conn.id}
                                             className="text-[10px] bg-white/5 hover:bg-white/10 border border-white/10 px-2 py-1 rounded text-zinc-300 hover:text-white transition-colors cursor-pointer disabled:opacity-40 flex items-center gap-1"
                                           >
@@ -4084,6 +4114,102 @@ export default function Home() {
             : "bg-[#1a2b21]/90 border-[#4d8565]/40 text-[#9fd4b4]"
         }`}>
           {toast.text}
+        </div>
+      )}
+
+      {/* EMAIL DRAFT STYLE PICKER -- which real situation this email is going
+          into, so it doesn't invent a shared history that isn't real. Only
+          the picked combination gets generated, not every option at once. */}
+      {emailDraftModalConn && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+          <div className="bg-zinc-950/95 backdrop-blur-xl border border-white/10 rounded-2xl max-w-md w-full shadow-2xl p-6 space-y-5">
+            <div>
+              <h3 className="text-base font-bold text-white">Draft an email for {emailDraftModalConn.name}</h3>
+              <p className="text-xs text-zinc-500 mt-1">
+                Pick the situation this is actually going into, so it doesn't invent a history that isn't there.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-[10px] text-zinc-500 font-semibold uppercase tracking-wider mb-1">
+                LinkedIn contact status
+              </label>
+              {[
+                { value: "cold", label: "Haven't messaged them on LinkedIn" },
+                { value: "messaged_no_reply", label: "Messaged on LinkedIn, no reply yet" },
+                { value: "messaged_replied", label: "Messaged on LinkedIn, they replied" },
+                { value: "standard", label: "Standard cold email (default)" },
+              ].map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => setEmailContactStatus(opt.value)}
+                  className={`w-full flex items-center gap-2.5 text-left px-3 py-2.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer ${
+                    emailContactStatus === opt.value
+                      ? "bg-[#4d8565]/10 border-[#4d8565]/40 text-white"
+                      : "bg-white/[0.02] border-white/10 text-zinc-400 hover:border-white/20"
+                  }`}
+                >
+                  <span className={`shrink-0 w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
+                    emailContactStatus === opt.value ? "border-[#4d8565]" : "border-zinc-600"
+                  }`}>
+                    {emailContactStatus === opt.value && <span className="w-1.5 h-1.5 rounded-full bg-[#4d8565]" />}
+                  </span>
+                  {opt.label}
+                </button>
+              ))}
+              {emailContactStatus === "messaged_replied" && !emailDraftModalConn.conversation_verdict && (
+                <p className="text-[10px] text-amber-400 flex items-start gap-1.5 pt-1">
+                  <AlertCircle size={11} className="shrink-0 mt-0.5" />
+                  No conversation uploaded yet for this person, upload a screenshot from the row first for the best result.
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-[10px] text-zinc-500 font-semibold uppercase tracking-wider mb-1">
+                Also add (optional, pick any)
+              </label>
+              {[
+                { value: "referral", label: "Ask for a referral" },
+                { value: "punchy_opener", label: "Start with something eye-catching" },
+              ].map(opt => {
+                const active = emailStyleModifiers.includes(opt.value);
+                return (
+                  <button
+                    key={opt.value}
+                    onClick={() => setEmailStyleModifiers(m => active ? m.filter(x => x !== opt.value) : [...m, opt.value])}
+                    className={`w-full flex items-center gap-2.5 text-left px-3 py-2.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer ${
+                      active
+                        ? "bg-[#4d8565]/10 border-[#4d8565]/40 text-white"
+                        : "bg-white/[0.02] border-white/10 text-zinc-400 hover:border-white/20"
+                    }`}
+                  >
+                    <span className={`shrink-0 w-3.5 h-3.5 rounded border-2 flex items-center justify-center ${
+                      active ? "border-[#4d8565] bg-[#4d8565]" : "border-zinc-600"
+                    }`}>
+                      {active && <Check size={10} className="text-zinc-950" />}
+                    </span>
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                onClick={() => setEmailDraftModalConn(null)}
+                className="px-4 py-2 rounded-lg text-xs font-semibold text-zinc-400 hover:text-white cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmGenerateEmail}
+                className="bg-emerald-950/30 border border-emerald-800/50 hover:bg-emerald-900/40 hover:border-emerald-600 text-xs font-semibold text-emerald-400 hover:text-emerald-300 px-4 py-2 rounded-lg cursor-pointer transition-colors"
+              >
+                Generate
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
