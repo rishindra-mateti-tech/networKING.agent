@@ -3,11 +3,14 @@ import datetime
 import html
 import httpx
 import os
+import secrets
 from typing import List, Optional
 from fastapi import FastAPI, Depends, HTTPException, Request, status, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token as google_id_token
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from sqlalchemy.exc import DataError
@@ -35,7 +38,7 @@ from generator import (
 from twin_agent import compile_twin_agent_profile, get_sender_name
 
 from migrate import run_migrations
-from config import CORS_ORIGINS
+from config import CORS_ORIGINS, GOOGLE_CLIENT_ID
 
 # Run database schema migrations
 run_migrations()
@@ -157,19 +160,7 @@ def get_queue_status(current_user: models.User = Depends(get_current_user), db: 
 
 # --- AUTH ENDPOINTS ---
 
-@app.post("/api/auth/register", response_model=schemas.UserOut)
-def register(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
-    db_user = db.query(models.User).filter(models.User.email == user_data.email).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    
-    hashed_pwd = get_password_hash(user_data.password)
-    new_user = models.User(email=user_data.email, hashed_password=hashed_pwd)
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    
-    # Initialize basic settings keys for this user
+def _init_default_settings(db: Session, user_id: int):
     basic_keys = [
         "resume_context", "resume_latex", "github_url",
         "portfolio_url", "linkedin_url", "telegram_token",
@@ -181,10 +172,23 @@ def register(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
     ]
     for key in basic_keys:
         default_val = "15" if key == "pacing_interval_minutes" else ""
-        setting = models.Setting(user_id=new_user.id, key=key, value=default_val)
-        db.add(setting)
+        db.add(models.Setting(user_id=user_id, key=key, value=default_val))
     db.commit()
-    
+
+
+@app.post("/api/auth/register", response_model=schemas.UserOut)
+def register(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
+    db_user = db.query(models.User).filter(models.User.email == user_data.email).first()
+    if db_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    hashed_pwd = get_password_hash(user_data.password)
+    new_user = models.User(email=user_data.email, hashed_password=hashed_pwd)
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    _init_default_settings(db, new_user.id)
     return new_user
 
 @app.post("/api/auth/login", response_model=schemas.Token)
@@ -196,6 +200,36 @@ def login(login_data: schemas.UserLogin, db: Session = Depends(get_db)):
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    access_token = create_access_token(data={"sub": user.email, "user_id": user.id})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.post("/api/auth/google", response_model=schemas.Token)
+def login_with_google(body: schemas.GoogleAuthRequest, db: Session = Depends(get_db)):
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="Google sign-in isn't configured on this server yet")
+
+    try:
+        payload = google_id_token.verify_oauth2_token(
+            body.credential, google_requests.Request(), GOOGLE_CLIENT_ID
+        )
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid Google credential")
+
+    email = payload.get("email")
+    if not email or not payload.get("email_verified"):
+        raise HTTPException(status_code=401, detail="Google account has no verified email")
+
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if not user:
+        # Google-authenticated accounts never use this password; it just
+        # satisfies the column so login()'s local-password path stays unused.
+        unusable_password = get_password_hash(secrets.token_urlsafe(32))
+        user = models.User(email=email, hashed_password=unusable_password)
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        _init_default_settings(db, user.id)
+
     access_token = create_access_token(data={"sub": user.email, "user_id": user.id})
     return {"access_token": access_token, "token_type": "bearer"}
 

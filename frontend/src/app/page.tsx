@@ -1,11 +1,12 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import Link from "next/link";
 import {
   Users, User, Key, Settings, LogOut, Search, Plus, Star, Trash2,
   Send, RefreshCw, Check, Copy, Clipboard, FileText, ArrowRight, MessageSquare, AlertCircle,
   Zap, Loader2, Menu, X, BarChart3, ImagePlus, Sparkles, Mail, ExternalLink, ChevronDown, ChevronRight,
-  Code2, Contact, Globe, Pencil, Link2
+  Code2, Contact, Globe, Pencil, Link2, ShieldCheck, Bell
 } from "lucide-react";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -31,10 +32,39 @@ function useDebouncedSave(value: string, save: (v: string) => void, enabled: boo
 export default function Home() {
   // Authentication State
   const [token, setToken] = useState<string | null>(null);
-  const [authMode, setAuthMode] = useState<"login" | "register">("login");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [authError, setAuthError] = useState("");
+
+  // Letter-by-letter reveal of the landing page headline, "Welcome to networKING.agent"
+  const heroFullLength = "Welcome to networKING.agent".length;
+  const [heroTyped, setHeroTyped] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setHeroTyped(n => {
+        if (n >= heroFullLength) {
+          clearInterval(interval);
+          return n;
+        }
+        return n + 1;
+      });
+    }, 45);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Once typing finishes, "KING" blinks and swaps with the crown logo, forever
+  const [heroShowCrown, setHeroShowCrown] = useState(false);
+  const [heroBlinking, setHeroBlinking] = useState(false);
+  useEffect(() => {
+    if (heroTyped < heroFullLength) return;
+    const cycle = setInterval(() => {
+      setHeroBlinking(true);
+      setTimeout(() => {
+        setHeroShowCrown(v => !v);
+        setHeroBlinking(false);
+      }, 220);
+    }, 1800);
+    return () => clearInterval(cycle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [heroTyped >= heroFullLength]);
 
   // Global App State
   const [currentView, setCurrentView] = useState<"pipeline" | "twinagent" | "apikeys" | "settings" | "insights" | "uploads" | "help-telegram" | "help-slack">("pipeline");
@@ -439,48 +469,6 @@ export default function Home() {
   useDebouncedSave(contactEmail, (v) => saveSetting("contact_email", v), settingsLoaded);
   useDebouncedSave(JSON.stringify(customLinks), (v) => saveSetting("custom_links", v), settingsLoaded);
   useDebouncedSave(JSON.stringify(tonePresets), (v) => saveSetting("tone_presets", v), settingsLoaded);
-
-  // Auth Operations
-  const handleAuthSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError("");
-    const path = authMode === "login" ? "/api/auth/login" : "/api/auth/register";
-    const payload = authMode === "login" 
-      ? { email, password } 
-      : { email, password };
-      
-    try {
-      const res = await fetch(`${BACKEND_URL}${path}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      
-      if (!res.ok) {
-        setAuthError(data.detail || "Authentication failed");
-        return;
-      }
-      
-      if (authMode === "login") {
-        setToken(data.access_token);
-      } else {
-        // Registered successfully, auto login
-        setAuthMode("login");
-        const loginRes = await fetch(`${BACKEND_URL}/api/auth/login`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password })
-        });
-        const loginData = await loginRes.json();
-        if (loginRes.ok) {
-          setToken(loginData.access_token);
-        }
-      }
-    } catch (err) {
-      setAuthError("Failed to connect to backend");
-    }
-  };
 
   const handleLogout = () => {
     setToken(null);
@@ -1088,71 +1076,137 @@ export default function Home() {
   const activeWorkersCount = keys.filter(k => k.is_active && k.role === "primary" && (!k.cooldown_until || new Date(k.cooldown_until) < new Date())).length;
 
   if (!token) {
-    // --- AUTHENTICATION ENTRY PANEL ---
+    // --- MARKETING + AUTHENTICATION LANDING PAGE ---
+    const features: { icon: typeof Search; title: string; desc: string }[] = [
+      { icon: Search, title: "Research and analysis", desc: "Every profile gets analyzed for role, company context, and what's actually worth mentioning, not just a name and a job title." },
+      { icon: BarChart3, title: "One dashboard", desc: "A pipeline board across Pending, Draft Ready, Sent, Replied, and Closed, so you always know who you've actually talked to." },
+      { icon: Bell, title: "Telegram and Slack alerts", desc: "Get notified the moment a draft is ready, right where you already work." },
+      { icon: Pencil, title: "Personalized messages", desc: "Drafts are tuned to who you're messaging. A VP gets a different ask than a recruiter, never a generic template." },
+      { icon: User, title: "Teach it your voice", desc: "Feed it your own writing once, and drafts start sounding like you instead of a template." },
+      { icon: Send, title: "You hit send, not us", desc: "No LinkedIn bot, no bulk blasting. Drafts land in your dashboard for you to edit and paste in yourself." },
+    ];
+
     return (
-      <div className="min-h-screen bg-zinc-950 flex flex-col justify-center items-center px-4">
-        <div className="max-w-md w-full bg-zinc-900 border border-zinc-800 rounded-2xl p-8 shadow-2xl relative overflow-hidden">
-          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-zinc-700 to-zinc-500"></div>
-          <div className="text-center mb-8">
-            <img src="/icon-192.png" alt="networKING.agent" className="w-16 h-16 mx-auto mb-3" />
-            <h1 className="text-3xl font-extrabold tracking-tight text-[#ebe5d6]">
-              networ<span className="text-[#4d8565]">KING</span>.agent
-            </h1>
-            <p className="text-sm text-zinc-400 mt-2">
-              Relationship-first LinkedIn outreach automation
-            </p>
+      <div className="min-h-screen bg-zinc-950 text-zinc-200 relative overflow-hidden">
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{ background: "radial-gradient(ellipse 900px 600px at 25% 30%, rgba(77,133,101,0.08), transparent 70%)" }}
+        />
+
+        <div className="relative min-h-screen flex flex-col lg:flex-row">
+          {/* LEFT: brand / services */}
+          <div className="flex-1 flex flex-col justify-center px-6 sm:px-12 lg:px-20 py-16">
+            <div className="max-w-xl mx-auto lg:mx-0 w-full">
+              <div className="flex items-center gap-3 mb-8">
+                <img src="/icon-192.png" alt="networKING.agent" className="w-11 h-11 rounded-xl shadow-lg shadow-[#4d8565]/20" />
+              </div>
+
+              <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-[#ebe5d6] leading-[1.1] min-h-[2.2em] sm:min-h-[2.4em]">
+                {(() => {
+                  const HERO_LINE1 = "Welcome to";
+                  const HERO_PREFIX = "networ";
+                  const HERO_KING = "KING";
+                  const HERO_SUFFIX = ".agent";
+                  const heroDone = heroTyped >= heroFullLength;
+
+                  const line1Typed = HERO_LINE1.slice(0, heroTyped);
+                  const afterLine1 = Math.max(0, heroTyped - HERO_LINE1.length);
+                  const prefixTyped = HERO_PREFIX.slice(0, afterLine1);
+                  const kingTyped = HERO_KING.slice(0, Math.max(0, afterLine1 - HERO_PREFIX.length));
+                  const suffixTyped = HERO_SUFFIX.slice(0, Math.max(0, afterLine1 - HERO_PREFIX.length - HERO_KING.length));
+
+                  const cursor = (
+                    <span
+                      className="inline-block w-[3px] sm:w-1 h-[0.85em] bg-[#4d8565] ml-1 align-middle animate-pulse"
+                      aria-hidden="true"
+                    />
+                  );
+
+                  return (
+                    <>
+                      {line1Typed}
+                      {!heroDone && line1Typed.length < HERO_LINE1.length && cursor}
+                      <br />
+                      {prefixTyped}
+                      {heroDone && heroShowCrown ? (
+                        <span
+                          className="inline-flex items-center transition-opacity duration-200"
+                          style={{ opacity: heroBlinking ? 0 : 1 }}
+                        >
+                          {" "}
+                          <img
+                            src="/icon-192.png"
+                            alt="networKING.agent"
+                            className="inline-block w-[1.5em] h-[1.5em] rounded-lg align-baseline"
+                            style={{ filter: "drop-shadow(0 0 8px rgba(77,133,101,0.95)) drop-shadow(0 0 20px rgba(77,133,101,0.65))" }}
+                          />{" "}
+                        </span>
+                      ) : (
+                        <span
+                          className="text-[#4d8565] transition-opacity duration-200"
+                          style={{
+                            opacity: heroDone && heroBlinking ? 0 : 1,
+                            textShadow: heroDone ? "0 0 10px rgba(77,133,101,0.9), 0 0 22px rgba(77,133,101,0.55)" : undefined,
+                          }}
+                        >
+                          {kingTyped}
+                        </span>
+                      )}
+                      {suffixTyped}
+                      {heroTyped >= HERO_LINE1.length && cursor}
+                    </>
+                  );
+                })()}
+              </h1>
+              <p className="mt-5 text-base sm:text-lg text-zinc-400 leading-relaxed">
+                Hi, I'm Rishindra Mateti, the developer and creator of this project.
+                Real LinkedIn outreach takes real research per person, and I wanted
+                that research done well, so my own time goes into judgment: who to
+                reach out to, what to actually say, and whether to hit send.
+              </p>
+
+              <div className="mt-10 grid sm:grid-cols-2 gap-4">
+                {features.map(f => (
+                  <div key={f.title} className="bg-white/[0.03] border border-white/10 rounded-xl p-4 hover:border-[#4d8565]/30 transition-colors">
+                    <f.icon size={18} className="text-[#4d8565] mb-2" />
+                    <div className="text-sm font-semibold text-zinc-100">{f.title}</div>
+                    <div className="text-xs text-zinc-500 mt-1.5 leading-relaxed">{f.desc}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-8 flex items-start gap-2 text-[11px] text-zinc-500">
+                <ShieldCheck size={14} className="text-[#4d8565] mt-0.5 shrink-0" />
+                <span>No LinkedIn bot or bulk messaging. API keys encrypted at rest. BYOK, bring your own key.</span>
+              </div>
+            </div>
           </div>
 
-          <form onSubmit={handleAuthSubmit} className="space-y-6">
-            <div>
-              <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Email Address</label>
-              <input 
-                type="email" 
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                required
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-sm text-zinc-200 focus:outline-none focus:border-zinc-700 transition-colors"
-                placeholder="you@example.com"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Password</label>
-              <input 
-                type="password" 
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                required
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-3 text-sm text-zinc-200 focus:outline-none focus:border-zinc-700 transition-colors"
-                placeholder="••••••••"
-              />
-            </div>
+          {/* RIGHT: sign in / sign up CTA */}
+          <div className="flex-1 flex items-center justify-center px-4 py-16 border-t lg:border-t-0 lg:border-l border-white/10">
+            <div className="max-w-sm w-full text-center">
+              <img src="/icon-192.png" alt="networKING.agent" className="w-10 h-10 mx-auto mb-5" />
+              <h2 className="text-xl font-bold text-[#ebe5d6]">Already a user?</h2>
+              <p className="text-sm text-zinc-500 mt-2">
+                Sign in to pick up your outreach pipeline where you left it.
+              </p>
 
-            {authError && (
-              <div className="flex items-center space-x-2 text-xs text-rose-500 bg-rose-500/10 border border-rose-500/20 rounded-lg p-3">
-                <AlertCircle size={16} />
-                <span>{authError}</span>
+              <div className="mt-6 bg-zinc-900 border border-white/10 rounded-2xl p-6 shadow-2xl shadow-black/40">
+                <Link
+                  href="/login"
+                  className="block w-full bg-[#4d8565] hover:bg-[#5a9873] text-zinc-950 text-sm font-bold py-2.5 rounded-lg transition-colors"
+                >
+                  Sign In
+                </Link>
+
+                <Link
+                  href="/login?mode=register"
+                  className="block mt-4 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                >
+                  New here? <span className="text-[#4d8565] font-medium">Create a free account</span>
+                </Link>
               </div>
-            )}
-
-            <button 
-              type="submit"
-              className="w-full bg-zinc-900 border border-zinc-800 text-zinc-300 hover:bg-zinc-800 hover:text-white hover:border-zinc-700 text-sm font-semibold py-3 rounded-lg transition-colors cursor-pointer shadow-lg shadow-zinc-950/40"
-            >
-              {authMode === "login" ? "Sign In" : "Create Account"}
-            </button>
-
-          </form>
-
-          <div className="text-center mt-6">
-            <button 
-              onClick={() => {
-                setAuthMode(authMode === "login" ? "register" : "login");
-                setAuthError("");
-              }}
-              className="text-xs text-zinc-400 hover:text-zinc-200 underline transition-colors cursor-pointer"
-            >
-              {authMode === "login" ? "Need an account? Sign up" : "Already have an account? Log in"}
-            </button>
+            </div>
           </div>
         </div>
       </div>

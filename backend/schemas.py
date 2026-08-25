@@ -11,6 +11,9 @@ class UserLogin(BaseModel):
     email: EmailStr
     password: str
 
+class GoogleAuthRequest(BaseModel):
+    credential: str
+
 class UserOut(BaseModel):
     id: int
     email: EmailStr

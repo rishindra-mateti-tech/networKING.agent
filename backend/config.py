@@ -32,6 +32,10 @@ def _get_or_create_secret(key: str) -> str:
 JWT_SECRET_KEY = _get_or_create_secret("JWT_SECRET_KEY")
 ENCRYPTION_KEY = _get_or_create_secret("ENCRYPTION_KEY")
 
+# From Google Cloud Console -> APIs & Services -> Credentials -> OAuth client ID
+# (type "Web application"). Not auto-generated: you create this yourself.
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+
 # Comma-separated list of allowed frontend origins, e.g.
 # "http://localhost:3000,https://app.example.com"
 CORS_ORIGINS = [
