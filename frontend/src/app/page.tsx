@@ -7,7 +7,7 @@ import {
   Send, RefreshCw, Check, Copy, Clipboard, FileText, ArrowRight, MessageSquare, AlertCircle,
   Zap, Loader2, Menu, X, BarChart3, ImagePlus, Sparkles, Mail, ExternalLink, ChevronDown, ChevronRight,
   Code2, Contact, Globe, Pencil, Link2, ShieldCheck, Bell, Target, MessageCircle,
-  HelpCircle
+  HelpCircle, ListFilter, Workflow
 } from "lucide-react";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -86,6 +86,96 @@ function initialsOf(name: string) {
   return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
 }
 
+type ConnCategory = "none" | "date" | "week" | "seniority" | "score";
+type ConnBucket = { key: string; label: string; items: any[] };
+
+// Groups an already-filtered connection list into labeled, collapsible
+// buckets for the pipeline's "Categorize" dropdown. Buckets with nothing in
+// them are dropped rather than shown empty (e.g. no "Yesterday" bucket when
+// nothing was added yesterday).
+function bucketConnections(list: any[], mode: ConnCategory): ConnBucket[] {
+  if (mode === "date") {
+    const dayKey = (d: Date) => d.toDateString();
+    const today = dayKey(new Date());
+    const yesterday = dayKey(new Date(Date.now() - 86400000));
+    const groups = new Map<string, any[]>();
+    for (const c of list) {
+      const key = dayKey(new Date(c.created_at));
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(c);
+    }
+    return [...groups.keys()]
+      .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())
+      .map(key => {
+        const formatted = new Date(key).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+        return {
+          key,
+          label: key === today ? `Today · ${formatted}` : key === yesterday ? `Yesterday · ${formatted}` : formatted,
+          items: groups.get(key)!,
+        };
+      });
+  }
+
+  if (mode === "week") {
+    const startOfWeek = (d: Date) => {
+      const x = new Date(d);
+      const day = x.getDay();
+      x.setDate(x.getDate() + ((day === 0 ? -6 : 1) - day));
+      x.setHours(0, 0, 0, 0);
+      return x;
+    };
+    const thisWeekStart = startOfWeek(new Date());
+    const lastWeekStart = new Date(thisWeekStart);
+    lastWeekStart.setDate(lastWeekStart.getDate() - 7);
+
+    const thisWeek: any[] = [], lastWeek: any[] = [], older: any[] = [];
+    for (const c of list) {
+      const d = new Date(c.created_at);
+      if (d >= thisWeekStart) thisWeek.push(c);
+      else if (d >= lastWeekStart) lastWeek.push(c);
+      else older.push(c);
+    }
+    const out: ConnBucket[] = [];
+    if (thisWeek.length) out.push({ key: "this_week", label: "This week", items: thisWeek });
+    if (lastWeek.length) out.push({ key: "last_week", label: "Last week", items: lastWeek });
+    if (older.length) out.push({ key: "older_weeks", label: "Previous weeks", items: older });
+    return out;
+  }
+
+  if (mode === "seniority") {
+    const buckets: ConnBucket[] = [
+      { key: "director", label: "Directors / 12+ yrs experience", items: [] },
+      { key: "senior", label: "Senior (6–12 yrs)", items: [] },
+      { key: "mid", label: "Mid (3–6 yrs)", items: [] },
+      { key: "entry", label: "Entry level (0–3 yrs)", items: [] },
+    ];
+    for (const c of list) {
+      const yrs = c.years_experience || 0;
+      if (yrs >= 12) buckets[0].items.push(c);
+      else if (yrs >= 6) buckets[1].items.push(c);
+      else if (yrs >= 3) buckets[2].items.push(c);
+      else buckets[3].items.push(c);
+    }
+    return buckets.filter(b => b.items.length > 0);
+  }
+
+  // mode === "score"
+  const buckets: ConnBucket[] = [
+    { key: "green", label: "Green · 7.5+ match", items: [] },
+    { key: "yellow", label: "Yellow · 5–7.5 match", items: [] },
+    { key: "red", label: "Red · under 5 match", items: [] },
+    { key: "unscored", label: "Not scored yet", items: [] },
+  ];
+  for (const c of list) {
+    const s = c.networking_score;
+    if (s == null) buckets[3].items.push(c);
+    else if (s >= 7.5) buckets[0].items.push(c);
+    else if (s >= 5) buckets[1].items.push(c);
+    else buckets[2].items.push(c);
+  }
+  return buckets.filter(b => b.items.length > 0);
+}
+
 export default function Home() {
   // Authentication State
   const [token, setToken] = useState<string | null>(null);
@@ -124,7 +214,7 @@ export default function Home() {
   }, [heroTyped >= heroFullLength]);
 
   // Global App State
-  const [currentView, setCurrentView] = useState<"pipeline" | "twinagent" | "apikeys" | "settings" | "insights" | "uploads" | "faq">("pipeline");
+  const [currentView, setCurrentView] = useState<"pipeline" | "twinagent" | "apikeys" | "settings" | "insights" | "uploads" | "faq" | "guide">("pipeline");
   const [openFaqSections, setOpenFaqSections] = useState<number[]>([0]);
   const [connections, setConnections] = useState<any[]>([]);
   const [keys, setKeys] = useState<any[]>([]);
@@ -133,6 +223,9 @@ export default function Home() {
   // Search & Filter
   const [searchQuery, setSearchQuery] = useState("");
   const [statusGroupFilter, setStatusGroupFilter] = useState("");
+  const [categorizeBy, setCategorizeBy] = useState<ConnCategory>("none");
+  const [categorizeMenuOpen, setCategorizeMenuOpen] = useState(false);
+  const [openBuckets, setOpenBuckets] = useState<string[]>([]);
 
   // Modals / Selected Items
   const [selectedConnection, setSelectedConnection] = useState<any | null>(null);
@@ -341,7 +434,7 @@ export default function Home() {
     if (localToken) {
       setToken(localToken);
     }
-    const validViews = ["pipeline", "twinagent", "apikeys", "settings", "insights", "uploads", "faq"];
+    const validViews = ["pipeline", "twinagent", "apikeys", "settings", "insights", "uploads", "faq", "guide"];
     const savedView = localStorage.getItem("currentView");
     if (savedView && validViews.includes(savedView)) {
       setCurrentView(savedView as typeof currentView);
@@ -799,7 +892,7 @@ export default function Home() {
           location: newConnLocation,
           posts_text: newConnPosts,
           profile_url: newConnUrl || null,
-          connection_count: customConnCount || 0
+          connection_count: customConnCount
         };
         const res = await fetchWithAuth("/api/connections", {
           method: "POST",
@@ -1340,12 +1433,129 @@ export default function Home() {
   }
 
   // --- SAAS DASHBOARD INTERFACE ---
-  const goToView = (view: "pipeline" | "twinagent" | "apikeys" | "settings" | "insights" | "uploads" | "faq") => {
+  const goToView = (view: "pipeline" | "twinagent" | "apikeys" | "settings" | "insights" | "uploads" | "faq" | "guide") => {
     setCurrentView(view);
     localStorage.setItem("currentView", view);
     setSelectedConnection(null);
     setMobileNavOpen(false);
   };
+
+  const toggleBucket = (key: string) => {
+    setOpenBuckets(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
+  };
+
+  const renderConnectionRow = (conn: any) => (
+    <div
+      key={conn.id}
+      onClick={() => setSelectedConnection(conn)}
+      className="bg-white/[0.03] hover:bg-white/[0.05] backdrop-blur-xl border border-white/10 hover:border-white/20 rounded-xl px-4 py-3.5 cursor-pointer transition-all hover:shadow-lg hover:shadow-black/20 group flex items-center gap-4"
+    >
+      {/* Avatar */}
+      <div
+        className={`shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-[11px] font-bold ${avatarStyle(conn.networking_score)}`}
+      >
+        {initialsOf(conn.name)}
+      </div>
+
+      {/* Identity */}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          {conn.is_starred && (
+            <Star size={11} className="text-amber-400 shrink-0" fill="currentColor" />
+          )}
+          <h3 className="text-sm font-bold text-white truncate">{conn.name}</h3>
+        </div>
+        <p className="text-[11px] text-zinc-400 truncate mt-0.5">
+          {[conn.current_title, conn.company].filter(Boolean).join(" · ") || "No title or company yet"}
+        </p>
+        {conn.error_message && (
+          <div className="mt-1.5 text-[9px] text-rose-400 flex items-center gap-1">
+            <AlertCircle size={9} className="shrink-0" />
+            <span className="truncate">{conn.error_message}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Signal chips. Colour carries the meaning here so the
+          numbers are readable at a glance instead of being
+          uniform low-contrast grey. */}
+      <div className="hidden md:flex items-center gap-1.5 shrink-0">
+        {conn.best_angle && (
+          <span className="text-[9px] font-semibold uppercase tracking-wider bg-white/5 text-zinc-400 border border-white/10 px-1.5 py-0.5 rounded">
+            {conn.best_angle}
+          </span>
+        )}
+        {conn.current_company_years_experience != null && conn.current_company_years_experience > 0 && (
+          <span
+            title={`${conn.current_company_years_experience} years at ${conn.company || "current company"}`}
+            className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded border bg-amber-500/10 text-amber-300 border-amber-500/25"
+          >
+            {conn.current_company_years_experience}y@co
+          </span>
+        )}
+        {conn.years_experience > 0 && (
+          <span
+            title={`${conn.years_experience} years of total experience`}
+            className={`text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded border ${
+              conn.years_experience >= 10
+                ? "bg-violet-500/10 text-violet-300 border-violet-500/25"
+                : conn.years_experience >= 5
+                ? "bg-sky-500/10 text-sky-300 border-sky-500/25"
+                : "bg-white/5 text-zinc-300 border-white/10"
+            }`}
+          >
+            {conn.years_experience}y total
+          </span>
+        )}
+        {conn.networking_score && (
+          <span
+            title={`Networking score ${conn.networking_score} out of 10`}
+            className={`text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded border ${
+              conn.networking_score >= 7.5
+                ? "bg-[#4d8565]/15 text-[#8fc7a4] border-[#4d8565]/30"
+                : conn.networking_score >= 5
+                ? "bg-amber-500/10 text-amber-300 border-amber-500/25"
+                : "bg-rose-500/10 text-rose-300 border-rose-500/25"
+            }`}
+          >
+            {conn.networking_score}/10
+          </span>
+        )}
+      </div>
+
+      {/* Status */}
+      <span className={`text-[10px] font-semibold px-2 py-1 rounded-md shrink-0 w-24 text-center ${
+        conn.status === "processing" ? "bg-amber-500/10 text-amber-400" :
+        conn.status === "completed" ? "bg-white/10 text-zinc-200" :
+        conn.status === "sent" ? "bg-sky-500/10 text-sky-300" :
+        ["replied", "follow_up"].includes(conn.status) ? "bg-[#4d8565]/15 text-[#7fb894]" :
+        conn.status === "failed" ? "bg-rose-500/10 text-rose-400" :
+        "bg-white/5 text-zinc-500"
+      }`}>
+        {conn.status === "completed" ? "Draft Ready"
+          : conn.status === "follow_up" ? "Follow Up"
+          : conn.status.charAt(0).toUpperCase() + conn.status.slice(1)}
+      </span>
+
+      {/* Row actions */}
+      <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          onClick={(e) => { e.stopPropagation(); handleToggleStar(conn.id); }}
+          className={`p-1.5 rounded hover:bg-white/10 transition-colors ${conn.is_starred ? "text-amber-400" : "text-zinc-500"}`}
+          aria-label="Star"
+        >
+          <Star size={13} fill={conn.is_starred ? "currentColor" : "none"} />
+        </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); handleDeleteConnection(conn.id); }}
+          className="p-1.5 rounded hover:bg-white/10 text-zinc-500 hover:text-rose-400 transition-colors"
+          aria-label="Delete"
+        >
+          <Trash2 size={13} />
+        </button>
+      </div>
+    </div>
+  );
 
   const openFaqAt = (index: number) => {
     setOpenFaqSections([index]);
@@ -1680,6 +1890,47 @@ export default function Home() {
 
             <div className="flex-1 px-6 py-4 overflow-y-auto space-y-4">
 
+              {/* Categorize: an optional grouped view over the flat list below,
+                  kept as a single dropdown so the page doesn't get busier by default. */}
+              <div className="flex items-center justify-end relative">
+                {categorizeMenuOpen && (
+                  <div className="fixed inset-0 z-10" onClick={() => setCategorizeMenuOpen(false)} />
+                )}
+                <button
+                  onClick={() => setCategorizeMenuOpen(v => !v)}
+                  className="relative z-20 flex items-center gap-1.5 text-[11px] font-semibold text-zinc-400 hover:text-zinc-200 border border-white/10 hover:border-white/20 bg-white/[0.02] px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                >
+                  <ListFilter size={12} />
+                  <span>
+                    Categorize{categorizeBy !== "none" ? `: ${
+                      { date: "By date", week: "By week", seniority: "By seniority", score: "By match score" }[categorizeBy]
+                    }` : ""}
+                  </span>
+                  <ChevronDown size={12} className={categorizeMenuOpen ? "rotate-180" : ""} />
+                </button>
+                {categorizeMenuOpen && (
+                  <div className="absolute right-0 top-full mt-1 z-20 w-56 bg-zinc-900 border border-white/10 rounded-lg shadow-xl overflow-hidden">
+                    {([
+                      { key: "none", label: "None (flat list)" },
+                      { key: "date", label: "By date (day)" },
+                      { key: "week", label: "By week" },
+                      { key: "seniority", label: "By seniority (experience)" },
+                      { key: "score", label: "By match score" },
+                    ] as { key: ConnCategory; label: string }[]).map(opt => (
+                      <button
+                        key={opt.key}
+                        onClick={() => { setCategorizeBy(opt.key); setOpenBuckets([]); setCategorizeMenuOpen(false); }}
+                        className={`w-full text-left px-3 py-2 text-xs transition-colors cursor-pointer ${
+                          categorizeBy === opt.key ? "bg-white/10 text-white" : "text-zinc-300 hover:bg-white/5"
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* Status filter, doing the job the columns used to do */}
               <div className="flex flex-wrap items-center gap-1.5">
                 {[
@@ -1735,118 +1986,32 @@ export default function Home() {
                     );
                   }
 
-                  return visible.map(conn => (
-                    <div
-                      key={conn.id}
-                      onClick={() => setSelectedConnection(conn)}
-                      className="bg-white/[0.03] hover:bg-white/[0.05] backdrop-blur-xl border border-white/10 hover:border-white/20 rounded-xl px-4 py-3.5 cursor-pointer transition-all hover:shadow-lg hover:shadow-black/20 group flex items-center gap-4"
-                    >
-                      {/* Avatar */}
-                      <div
-                        className={`shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-[11px] font-bold ${avatarStyle(conn.networking_score)}`}
-                      >
-                        {initialsOf(conn.name)}
-                      </div>
+                  if (categorizeBy === "none") {
+                    return visible.map(conn => renderConnectionRow(conn));
+                  }
 
-                      {/* Identity */}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          {conn.is_starred && (
-                            <Star size={11} className="text-amber-400 shrink-0" fill="currentColor" />
-                          )}
-                          <h3 className="text-sm font-bold text-white truncate">{conn.name}</h3>
-                        </div>
-                        <p className="text-[11px] text-zinc-400 truncate mt-0.5">
-                          {[conn.current_title, conn.company].filter(Boolean).join(" · ") || "No title or company yet"}
-                        </p>
-                        {conn.error_message && (
-                          <div className="mt-1.5 text-[9px] text-rose-400 flex items-center gap-1">
-                            <AlertCircle size={9} className="shrink-0" />
-                            <span className="truncate">{conn.error_message}</span>
+                  return bucketConnections(visible, categorizeBy).map(bucket => {
+                    const isOpen = openBuckets.includes(bucket.key);
+                    return (
+                      <div key={bucket.key} className="border border-white/10 rounded-xl overflow-hidden bg-white/[0.02]">
+                        <button
+                          onClick={() => toggleBucket(bucket.key)}
+                          className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-white/[0.03] transition-colors cursor-pointer"
+                        >
+                          <span className="text-xs font-bold text-white">{bucket.label}</span>
+                          <span className="flex items-center gap-2 shrink-0">
+                            <span className="text-[10px] font-mono text-zinc-500">{bucket.items.length}</span>
+                            <ChevronDown size={14} className={`text-zinc-500 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                          </span>
+                        </button>
+                        {isOpen && (
+                          <div className="p-2 space-y-2 border-t border-white/5">
+                            {bucket.items.map((conn: any) => renderConnectionRow(conn))}
                           </div>
                         )}
                       </div>
-
-                      {/* Signal chips. Colour carries the meaning here so the
-                          numbers are readable at a glance instead of being
-                          uniform low-contrast grey. */}
-                      <div className="hidden md:flex items-center gap-1.5 shrink-0">
-                        {conn.best_angle && (
-                          <span className="text-[9px] font-semibold uppercase tracking-wider bg-white/5 text-zinc-400 border border-white/10 px-1.5 py-0.5 rounded">
-                            {conn.best_angle}
-                          </span>
-                        )}
-                        {conn.current_company_years_experience != null && conn.current_company_years_experience > 0 && (
-                          <span
-                            title={`${conn.current_company_years_experience} years at ${conn.company || "current company"}`}
-                            className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded border bg-amber-500/10 text-amber-300 border-amber-500/25"
-                          >
-                            {conn.current_company_years_experience}y@co
-                          </span>
-                        )}
-                        {conn.years_experience > 0 && (
-                          <span
-                            title={`${conn.years_experience} years of total experience`}
-                            className={`text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded border ${
-                              conn.years_experience >= 10
-                                ? "bg-violet-500/10 text-violet-300 border-violet-500/25"
-                                : conn.years_experience >= 5
-                                ? "bg-sky-500/10 text-sky-300 border-sky-500/25"
-                                : "bg-white/5 text-zinc-300 border-white/10"
-                            }`}
-                          >
-                            {conn.years_experience}y total
-                          </span>
-                        )}
-                        {conn.networking_score && (
-                          <span
-                            title={`Networking score ${conn.networking_score} out of 10`}
-                            className={`text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded border ${
-                              conn.networking_score >= 7.5
-                                ? "bg-[#4d8565]/15 text-[#8fc7a4] border-[#4d8565]/30"
-                                : conn.networking_score >= 5
-                                ? "bg-amber-500/10 text-amber-300 border-amber-500/25"
-                                : "bg-rose-500/10 text-rose-300 border-rose-500/25"
-                            }`}
-                          >
-                            {conn.networking_score}/10
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Status */}
-                      <span className={`text-[10px] font-semibold px-2 py-1 rounded-md shrink-0 w-24 text-center ${
-                        conn.status === "processing" ? "bg-amber-500/10 text-amber-400" :
-                        conn.status === "completed" ? "bg-white/10 text-zinc-200" :
-                        conn.status === "sent" ? "bg-sky-500/10 text-sky-300" :
-                        ["replied", "follow_up"].includes(conn.status) ? "bg-[#4d8565]/15 text-[#7fb894]" :
-                        conn.status === "failed" ? "bg-rose-500/10 text-rose-400" :
-                        "bg-white/5 text-zinc-500"
-                      }`}>
-                        {conn.status === "completed" ? "Draft Ready"
-                          : conn.status === "follow_up" ? "Follow Up"
-                          : conn.status.charAt(0).toUpperCase() + conn.status.slice(1)}
-                      </span>
-
-                      {/* Row actions */}
-                      <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleToggleStar(conn.id); }}
-                          className={`p-1.5 rounded hover:bg-white/10 transition-colors ${conn.is_starred ? "text-amber-400" : "text-zinc-500"}`}
-                          aria-label="Star"
-                        >
-                          <Star size={13} fill={conn.is_starred ? "currentColor" : "none"} />
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleDeleteConnection(conn.id); }}
-                          className="p-1.5 rounded hover:bg-white/10 text-zinc-500 hover:text-rose-400 transition-colors"
-                          aria-label="Delete"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </div>
-                  ));
+                    );
+                  });
                 })()}
               </div>
             </div>
@@ -3182,6 +3347,20 @@ export default function Home() {
                 </p>
               </div>
 
+              <button
+                onClick={() => goToView("guide")}
+                className="w-full flex items-center gap-4 bg-[#4d8565]/10 hover:bg-[#4d8565]/15 border border-[#4d8565]/30 hover:border-[#4d8565]/50 rounded-xl p-5 transition-colors cursor-pointer text-left"
+              >
+                <div className="shrink-0 w-10 h-10 rounded-full bg-[#4d8565]/20 border border-[#4d8565]/40 flex items-center justify-center">
+                  <Workflow size={18} className="text-[#8fc7a4]" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-sm font-bold text-white">Quick Setup Guide</h3>
+                  <p className="text-xs text-zinc-400 mt-0.5">New here? See the whole flow as a diagram, no reading required.</p>
+                </div>
+                <ChevronRight size={16} className="text-[#8fc7a4] shrink-0" />
+              </button>
+
               <div className="space-y-3">
                 {faqSections.map((section, i) => {
                   const isOpen = openFaqSections.includes(i);
@@ -3269,6 +3448,69 @@ export default function Home() {
                   >
                     <Star size={14} /> Star this repository
                   </a>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* VIEW: QUICK SETUP GUIDE -- diagrams, not a manual. Reached only from
+            the FAQ page's "Quick Setup Guide" card. */}
+        {currentView === "guide" && (() => {
+          const diagrams: { src: string; alt: string; caption: string }[] = [
+            { src: "/guide/overview.jpg", alt: "Four steps to your first draft: set up TwinAgent, add API keys, upload profiles, review and send", caption: "The whole flow, start to finish." },
+            { src: "/guide/twin-agent.jpg", alt: "TwinAgent takes your resume, writing tone, target roles, links, and notes, and turns them into drafts in your voice", caption: "TwinAgent Profile -- who you are, taught once." },
+            { src: "/guide/get-api-key.jpg", alt: "Open AI Studio, create an API key, paste it into Key Workers, free tier is enough to start", caption: "Getting a free Gemini API key." },
+            { src: "/guide/api-key-workers.jpg", alt: "Each primary API key runs its own worker pulling from the queue, standby keys take over on cooldown", caption: "API Key Workers -- more keys, faster processing." },
+            { src: "/guide/upload-profile.jpg", alt: "Open their LinkedIn profile, save as PDF, upload it to the pipeline", caption: "Adding someone to your pipeline." },
+            { src: "/guide/what-happens.jpg", alt: "The uploaded profile PDF is researched across profile, company, strategy, angle, and summary, then drafted into your draft", caption: "What happens to a profile once it's in." },
+            { src: "/guide/pipeline-stages.jpg", alt: "Pipeline stages: pending, processing, ready, sent (you send this one), replied, closed", caption: "Where to find someone in the pipeline." },
+          ];
+          const reference: { Icon: any; title: string; caption: string }[] = [
+            { Icon: Users, title: "Outreach Pipeline", caption: "Everyone you've added, with status, score, and drafts." },
+            { Icon: User, title: "TwinAgent Profile", caption: "Your resume, tone, and what you're looking for." },
+            { Icon: Key, title: "API Key Workers", caption: "Your Gemini keys, the engine behind every draft." },
+            { Icon: Settings, title: "Notifications & Pacing", caption: "Telegram/Slack alerts and how fast workers run." },
+            { Icon: HelpCircle, title: "FAQs", caption: "This whole page, for anything not covered here." },
+          ];
+          return (
+            <div className="p-4 sm:p-8 max-w-3xl w-full mx-auto space-y-8">
+              <div className="border-b border-zinc-800 pb-4">
+                <button
+                  onClick={() => goToView("faq")}
+                  className="text-[10px] font-semibold text-zinc-400 hover:text-white mb-2 cursor-pointer"
+                >
+                  &larr; Back to FAQs
+                </button>
+                <h2 className="text-2xl font-bold text-white bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-400">
+                  Quick Setup Guide
+                </h2>
+                <p className="text-xs text-zinc-400 mt-1">
+                  The whole flow, at a glance. No reading required.
+                </p>
+              </div>
+
+              <div className="space-y-5">
+                {diagrams.map(d => (
+                  <div key={d.src} className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl overflow-hidden">
+                    <img src={d.src} alt={d.alt} loading="lazy" className="w-full h-auto block" />
+                    <p className="text-xs text-zinc-400 px-5 py-3 border-t border-white/5">{d.caption}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="space-y-3">
+                <h3 className="text-xs font-bold text-white uppercase tracking-wider">Quick reference</h3>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  {reference.map(item => (
+                    <div key={item.title} className="flex items-start gap-3 bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-4">
+                      <item.Icon size={16} className="text-[#4d8565] shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <h4 className="text-xs font-bold text-white">{item.title}</h4>
+                        <p className="text-[11px] text-zinc-400 mt-0.5">{item.caption}</p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -3721,25 +3963,17 @@ export default function Home() {
                   </span>
                 </div>
 
-                {/* Hiring Badge Status */}
-                {(() => {
-                  let hiringBadge = "OFF";
-                  try {
-                    const pIntel = JSON.parse(selectedConnection.profile_intelligence || "{}");
-                    hiringBadge = pIntel.hiring_badge_status || "OFF";
-                  } catch(e) {}
-                  return (
-                    <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded p-2 text-center">
-                      <span className="text-[8px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">Hiring Badge</span>
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                        hiringBadge === "ON" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 animate-pulse" :
-                        "bg-zinc-800 text-zinc-500"
-                      }`}>
-                        {hiringBadge}
-                      </span>
-                    </div>
-                  );
-                })()}
+                {/* Hiring Badge Status -- user-entered only, never AI-guessed (see FAQ) */}
+                <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded p-2 text-center">
+                  <span className="text-[8px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1">Hiring Badge</span>
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                    selectedConnection.hiring_badge_status === "ON" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 animate-pulse" :
+                    selectedConnection.hiring_badge_status === "OFF" ? "bg-zinc-800 text-zinc-500" :
+                    "bg-zinc-800 text-zinc-600"
+                  }`}>
+                    {selectedConnection.hiring_badge_status || "NOT SET"}
+                  </span>
+                </div>
               </div>
 
               {selectedConnection.networking_difficulty && (
@@ -4487,7 +4721,10 @@ export default function Home() {
 
               {/* Hiring Toggle Override */}
               <div className="space-y-1.5">
-                <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider">Hiring Status Override (for this group / profile)</label>
+                <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider">Hiring Status (you'll need to enter this yourself)</label>
+                <p className="text-[10px] text-zinc-500">
+                  A text-only model can't reliably see LinkedIn's visual "Open to Work"/"Hiring" badge, so this isn't guessed. Leave it unset if you don't know.
+                </p>
                 <div className="flex items-center space-x-4 bg-zinc-950 border border-zinc-800 rounded p-2 text-xs">
                   <label className="flex items-center space-x-2 cursor-pointer text-zinc-300">
                     <input
@@ -4498,7 +4735,7 @@ export default function Home() {
                       onChange={() => setCustomHiringStatus("")}
                       className="accent-zinc-500"
                     />
-                    <span>Auto Detect (Gemini)</span>
+                    <span>Not set</span>
                   </label>
                   <label className="flex items-center space-x-2 cursor-pointer text-zinc-300">
                     <input
@@ -4527,7 +4764,10 @@ export default function Home() {
 
               {/* Connection Count Override */}
               <div className="space-y-1.5">
-                <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider">Connection Count Override (Optional)</label>
+                <label className="block text-[10px] text-zinc-400 font-semibold uppercase tracking-wider">Connection Count (Optional)</label>
+                <p className="text-[10px] text-zinc-500">
+                  Only used if you set it here or it's written in the PDF text. Left blank, it's excluded from scoring entirely rather than assumed.
+                </p>
                 <div className="flex flex-wrap gap-2 text-xs">
                   {[
                     { label: "Under 300", val: 200 },
