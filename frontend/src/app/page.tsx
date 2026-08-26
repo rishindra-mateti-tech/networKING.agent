@@ -3474,7 +3474,6 @@ export default function Home() {
             { Icon: HelpCircle, title: "FAQs", caption: "This whole page, for anything not covered here." },
           ];
           return (
-            <div className="min-h-full w-full bg-[#121212]">
             <div className="p-4 sm:p-8 max-w-3xl w-full mx-auto space-y-8">
               <div className="border-b border-zinc-800 pb-4">
                 <button
@@ -3514,7 +3513,6 @@ export default function Home() {
                   ))}
                 </div>
               </div>
-            </div>
             </div>
           );
         })()}
