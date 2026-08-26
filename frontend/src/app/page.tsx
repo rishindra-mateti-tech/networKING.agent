@@ -6,7 +6,8 @@ import {
   Users, User, Key, Settings, LogOut, Search, Plus, Star, Trash2,
   Send, RefreshCw, Check, Copy, Clipboard, FileText, ArrowRight, MessageSquare, AlertCircle,
   Zap, Loader2, Menu, X, BarChart3, ImagePlus, Sparkles, Mail, ExternalLink, ChevronDown, ChevronRight,
-  Code2, Contact, Globe, Pencil, Link2, ShieldCheck, Bell, Target, MessageCircle
+  Code2, Contact, Globe, Pencil, Link2, ShieldCheck, Bell, Target, MessageCircle,
+  HelpCircle
 } from "lucide-react";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -123,7 +124,8 @@ export default function Home() {
   }, [heroTyped >= heroFullLength]);
 
   // Global App State
-  const [currentView, setCurrentView] = useState<"pipeline" | "twinagent" | "apikeys" | "settings" | "insights" | "uploads" | "help-telegram" | "help-slack">("pipeline");
+  const [currentView, setCurrentView] = useState<"pipeline" | "twinagent" | "apikeys" | "settings" | "insights" | "uploads" | "faq">("pipeline");
+  const [openFaqSections, setOpenFaqSections] = useState<number[]>([0]);
   const [connections, setConnections] = useState<any[]>([]);
   const [keys, setKeys] = useState<any[]>([]);
   const [settings, setSettings] = useState<any[]>([]);
@@ -1333,10 +1335,19 @@ export default function Home() {
   }
 
   // --- SAAS DASHBOARD INTERFACE ---
-  const goToView = (view: "pipeline" | "twinagent" | "apikeys" | "settings" | "insights" | "uploads" | "help-telegram" | "help-slack") => {
+  const goToView = (view: "pipeline" | "twinagent" | "apikeys" | "settings" | "insights" | "uploads" | "faq") => {
     setCurrentView(view);
     setSelectedConnection(null);
     setMobileNavOpen(false);
+  };
+
+  const openFaqAt = (index: number) => {
+    setOpenFaqSections([index]);
+    goToView("faq");
+  };
+
+  const toggleFaqSection = (index: number) => {
+    setOpenFaqSections(prev => prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]);
   };
 
   // Shared across the three main pages. Lets the user interrogate their own
@@ -1495,6 +1506,18 @@ export default function Home() {
             )}
             <Settings size={18} className={currentView === "settings" ? "text-[#4d8565]" : ""} />
             <span>Notifications & Pacing</span>
+          </button>
+          <button
+            onClick={() => goToView("faq")}
+            className={`relative w-full flex items-center space-x-3 pl-4 pr-4 py-3 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+              currentView === "faq" ? "bg-[#4d8565]/10 text-white font-semibold" : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
+            }`}
+          >
+            {currentView === "faq" && (
+              <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-r bg-[#4d8565]" />
+            )}
+            <HelpCircle size={18} className={currentView === "faq" ? "text-[#4d8565]" : ""} />
+            <span>FAQs</span>
           </button>
         </nav>
 
@@ -2829,7 +2852,7 @@ export default function Home() {
                     )}
                   </h3>
                   <button
-                    onClick={() => goToView("help-telegram")}
+                    onClick={() => openFaqAt(2)}
                     className="text-[10px] font-semibold text-blue-400 hover:text-blue-300 flex items-center gap-1 cursor-pointer"
                   >
                     How do I get this? <ExternalLink size={10} />
@@ -2876,11 +2899,7 @@ export default function Home() {
                       setTelegramEnabled(next);
                       saveSetting("telegram_enabled", next ? "true" : "false");
                     }}
-                    className={`text-xs font-semibold px-4 py-2.5 rounded border transition-colors cursor-pointer ${
-                      telegramEnabled
-                        ? "bg-rose-950/20 hover:bg-rose-950/30 text-rose-400 border-rose-900/40"
-                        : "bg-[#4d8565]/10 hover:bg-[#4d8565]/20 text-[#8fc7a4] border-[#4d8565]/30"
-                    }`}
+                    className="bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 hover:text-white px-4 py-2.5 rounded border border-zinc-700 hover:border-zinc-600 transition-colors cursor-pointer"
                   >
                     {telegramEnabled ? "Disable" : "Enable"}
                   </button>
@@ -2912,7 +2931,7 @@ export default function Home() {
                     )}
                   </h3>
                   <button
-                    onClick={() => goToView("help-slack")}
+                    onClick={() => openFaqAt(3)}
                     className="text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
                   >
                     How do I get this? <ExternalLink size={10} />
@@ -2949,11 +2968,7 @@ export default function Home() {
                       setSlackEnabled(next);
                       saveSetting("slack_enabled", next ? "true" : "false");
                     }}
-                    className={`text-xs font-semibold px-4 py-2.5 rounded border transition-colors cursor-pointer ${
-                      slackEnabled
-                        ? "bg-rose-950/20 hover:bg-rose-950/30 text-rose-400 border-rose-900/40"
-                        : "bg-[#4d8565]/10 hover:bg-[#4d8565]/20 text-[#8fc7a4] border-[#4d8565]/30"
-                    }`}
+                    className="bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 hover:text-white px-4 py-2.5 rounded border border-zinc-700 hover:border-zinc-600 transition-colors cursor-pointer"
                   >
                     {slackEnabled ? "Disable" : "Enable"}
                   </button>
@@ -3006,7 +3021,15 @@ export default function Home() {
 
               {/* Queue Pacing */}
               <div className="space-y-4">
-                <h3 className="text-sm font-semibold text-white">Queue Pacing Controls</h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-white">Queue Pacing Controls</h3>
+                  <button
+                    onClick={() => openFaqAt(5)}
+                    className="text-[10px] font-semibold text-[#8fc7a4] hover:text-[#4d8565] flex items-center gap-1 cursor-pointer"
+                  >
+                    Why does this exist? <ExternalLink size={10} />
+                  </button>
+                </div>
                 <p className="text-xs text-zinc-400">
                   Configure the sleep delay (in minutes) a worker thread takes after completing an outreach task to pace operations.
                 </p>
@@ -3031,69 +3054,201 @@ export default function Home() {
           </div>
         )}
 
-        {/* Telegram setup help */}
-        {currentView === "help-telegram" && (
-          <div className="p-4 sm:p-8 max-w-xl w-full mx-auto space-y-6">
-            <div className="border-b border-zinc-800 pb-4">
-              <button
-                onClick={() => goToView("settings")}
-                className="text-[10px] font-semibold text-zinc-400 hover:text-white mb-2 cursor-pointer"
-              >
-                &larr; Back to Settings
-              </button>
-              <h2 className="text-2xl font-bold text-white bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-400">
-                Getting a Telegram bot token &amp; chat ID
-              </h2>
-            </div>
-            <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 space-y-4 text-xs text-zinc-300 leading-relaxed">
-              <ol className="space-y-3 list-decimal list-inside">
-                <li>Open Telegram and search for <span className="font-mono text-zinc-100">@BotFather</span> (the official bot that creates other bots).</li>
-                <li>Send it <span className="font-mono text-zinc-100">/newbot</span> and follow the prompts: pick a display name, then a username ending in <span className="font-mono text-zinc-100">bot</span>.</li>
-                <li>BotFather replies with a token that looks like <span className="font-mono text-zinc-100">123456789:AAExxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</span>. That's your <strong className="text-white">Telegram Bot Token</strong> above.</li>
-                <li>Open a chat with your new bot and send it any message (e.g. "hi") so Telegram knows you two have talked.</li>
-                <li>
-                  In a browser, visit{" "}
-                  <span className="font-mono text-zinc-100 break-all">https://api.telegram.org/bot&lt;YOUR_TOKEN&gt;/getUpdates</span>{" "}
-                  (with your real token in place of <span className="font-mono">&lt;YOUR_TOKEN&gt;</span>). Look for <span className="font-mono text-zinc-100">"chat":{"{"}"id":...</span> in the response, that number is your <strong className="text-white">Chat ID</strong>.
-                </li>
-                <li>Paste both values into Settings, they save automatically. Click "Test Telegram Connection" to confirm.</li>
-              </ol>
-            </div>
-          </div>
-        )}
+        {/* VIEW: FAQ */}
+        {currentView === "faq" && (() => {
+          const faqSections: { title: string; content: React.ReactNode }[] = [
+            {
+              title: "How do I get an API key, and what does this app support?",
+              content: (
+                <>
+                  <p>
+                    Right now networKING.agent only runs on Gemini API keys, that's the model doing every bit of research, scoring, and drafting behind the scenes. Head over to{" "}
+                    <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-[#8fc7a4] hover:text-[#4d8565] font-mono">
+                      aistudio.google.com/apikey
+                    </a>{" "}
+                    and grab a free key, Google gives every account a free tier with a daily quota, which is plenty to get started.
+                  </p>
+                  <p>
+                    Paste it into API Key Workers as a Primary key. If you've got more than one Google account, add a few more as Primary or Standby, each Primary key gets its own worker thread running in parallel, and Standby keys quietly take over if a Primary hits a rate limit. There's also a "Test API Key" button there that fires one real request to confirm a key actually works before you rely on it, it can only tell you the key is valid and live right now, Google doesn't expose whether a key is free or paid tier programmatically.
+                  </p>
+                </>
+              ),
+            },
+            {
+              title: "Why bother with Telegram or Slack if everything's already on the website?",
+              content: (
+                <>
+                  <p>
+                    Fair question, every draft the workers produce lands in your dashboard either way, Telegram and Slack don't unlock anything extra. I added them for convenience, not necessity.
+                  </p>
+                  <p>
+                    Once you've got 2 or 3 API keys running and you've uploaded 15+ PDFs in one go, the queue can take a while to work through. Instead of sitting on this tab watching a progress bar, you can close it, go do something else, and just get pinged the moment a draft is ready to review. It's also genuinely nicer from a phone, a push notification beats refreshing a dashboard tab on your commute. If you're fine watching the pipeline live, skip this entirely, it changes nothing about how the app works.
+                  </p>
+                </>
+              ),
+            },
+            {
+              title: "How do I integrate Telegram (step by step)",
+              content: (
+                <ol className="space-y-3 list-decimal list-inside">
+                  <li>Open Telegram and search for <span className="font-mono text-zinc-100">@BotFather</span> (the official bot that creates other bots).</li>
+                  <li>Send it <span className="font-mono text-zinc-100">/newbot</span> and follow the prompts: pick a display name, then a username ending in <span className="font-mono text-zinc-100">bot</span>.</li>
+                  <li>BotFather replies with a token that looks like <span className="font-mono text-zinc-100">123456789:AAExxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</span>. That's your <strong className="text-white">Telegram Bot Token</strong>.</li>
+                  <li>Open a chat with your new bot and send it any message (e.g. "hi") so Telegram knows you two have talked.</li>
+                  <li>
+                    In a browser, visit{" "}
+                    <span className="font-mono text-zinc-100 break-all">https://api.telegram.org/bot&lt;YOUR_TOKEN&gt;/getUpdates</span>{" "}
+                    (with your real token in place of <span className="font-mono">&lt;YOUR_TOKEN&gt;</span>). Look for <span className="font-mono text-zinc-100">"chat":{"{"}"id":...</span> in the response, that number is your <strong className="text-white">Chat ID</strong>.
+                  </li>
+                  <li>Paste both values into Notifications &amp; Pacing, they save automatically. Click "Test Telegram Connection" to confirm.</li>
+                </ol>
+              ),
+            },
+            {
+              title: "How do I integrate Slack (step by step)",
+              content: (
+                <ol className="space-y-3 list-decimal list-inside">
+                  <li>
+                    Go to{" "}
+                    <a href="https://api.slack.com/apps" target="_blank" rel="noopener noreferrer" className="text-[#8fc7a4] hover:text-[#4d8565] font-mono">
+                      api.slack.com/apps
+                    </a>{" "}
+                    and sign in to the Slack workspace you want notifications in.
+                  </li>
+                  <li>Click <strong className="text-white">Create New App</strong> &rarr; <strong className="text-white">From scratch</strong>, give it a name, and pick your workspace.</li>
+                  <li>In the app settings sidebar, click <strong className="text-white">Incoming Webhooks</strong>, then toggle it <strong className="text-white">On</strong>.</li>
+                  <li>Click <strong className="text-white">Add New Webhook to Workspace</strong>, pick the channel you want drafts posted to, and authorize it.</li>
+                  <li>Copy the generated URL, it looks like <span className="font-mono text-zinc-100 break-all">https://hooks.slack.com/services/T000/B000/xxxxxxxx</span>.</li>
+                  <li>Paste it into the Slack Incoming Webhook URL field in Notifications &amp; Pacing, it saves automatically. Click "Test Slack Connection" to confirm.</li>
+                </ol>
+              ),
+            },
+            {
+              title: "How is the Networking Score and Reply Probability calculated?",
+              content: (
+                <>
+                  <p>
+                    Short version: every profile you upload gets read by Gemini alongside your own TwinAgent profile, resume, tone, what you're actually looking for, and it scores how good a fit that connection is for you specifically, not some generic popularity score.
+                  </p>
+                  <p>
+                    <strong className="text-white">Networking Score</strong> (out of 10) weighs things like their seniority, whether they look like a decision maker, how much real overlap exists between their background and yours, and how reachable they seem. <strong className="text-white">Reply Probability</strong> estimates the odds they actually respond, based on similar signals plus how warm the likely ask is.
+                  </p>
+                  <p>
+                    Both are AI judgment calls, not a fixed formula, treat them as a ranking to help decide who to reach out to first, not as gospel. If you want the deeper mechanics or something looks off on a specific score, just reach out, I'll walk you through it.
+                  </p>
+                  <div className="flex items-center gap-4 pt-1">
+                    <a href="mailto:rishindra.tech@gmail.com" className="inline-flex items-center gap-1.5 text-[#8fc7a4] hover:text-[#4d8565]">
+                      <Mail size={14} /> rishindra.tech@gmail.com
+                    </a>
+                    <a href="https://www.linkedin.com/in/rishindra-mateti-tech/" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-[#8fc7a4] hover:text-[#4d8565]">
+                      <Contact size={14} /> LinkedIn
+                    </a>
+                  </div>
+                </>
+              ),
+            },
+            {
+              title: "Why do Queue Pacing Controls exist, and how are they useful?",
+              content: (
+                <p>
+                  Each worker thread, after it finishes drafting for one person, sleeps for this many minutes before it picks up the next one. Two reasons I added it. First, Gemini's free tier has per-minute rate limits, so pacing keeps a big batch from burning through your quota all at once. Second, if you've turned on Telegram or Slack, a wall of 15 notifications landing in the same second is more annoying than useful, spacing them out keeps them actually readable. Set it to 0.5 minutes if you're testing and want to see it work fast, leave it higher, 5 to 10 minutes, for a real batch you're happy to let run in the background over a few hours.
+                </p>
+              ),
+            },
+            {
+              title: "Is my data private? What happens to the PDFs I upload?",
+              content: (
+                <p>
+                  Everything you upload, your API keys, generated drafts, and PDFs, is scoped to your account only, other users can't see it. API keys are encrypted at rest, not stored in plain text. The only places your data goes are Google's Gemini API, to actually generate the research and drafts, and, only if you've turned them on, your own Telegram bot or Slack webhook. I don't read your drafts or uploads myself.
+                </p>
+              ),
+            },
+          ];
 
-        {/* Slack setup help */}
-        {currentView === "help-slack" && (
-          <div className="p-4 sm:p-8 max-w-xl w-full mx-auto space-y-6">
-            <div className="border-b border-zinc-800 pb-4">
-              <button
-                onClick={() => goToView("settings")}
-                className="text-[10px] font-semibold text-zinc-400 hover:text-white mb-2 cursor-pointer"
-              >
-                &larr; Back to Settings
-              </button>
-              <h2 className="text-2xl font-bold text-white bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-400">
-                Getting a Slack Incoming Webhook URL
-              </h2>
+          return (
+            <div className="p-4 sm:p-8 max-w-2xl w-full mx-auto space-y-8">
+              <div className="border-b border-zinc-800 pb-4">
+                <h2 className="text-2xl font-bold text-white bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-400">
+                  FAQs
+                </h2>
+                <p className="text-xs text-zinc-400 mt-1">
+                  Straight from me, not a support bot. Click a question to expand it.
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                {faqSections.map((section, i) => {
+                  const isOpen = openFaqSections.includes(i);
+                  return (
+                    <div key={i} className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl overflow-hidden">
+                      <button
+                        onClick={() => toggleFaqSection(i)}
+                        className="w-full flex items-center justify-between gap-4 px-5 py-4 text-left hover:bg-white/[0.03] transition-colors cursor-pointer"
+                      >
+                        <span className="text-sm font-semibold text-white">{section.title}</span>
+                        <ChevronDown size={16} className={`shrink-0 text-zinc-500 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                      </button>
+                      {isOpen && (
+                        <div className="px-5 pb-5 pt-1 border-t border-white/5 text-xs text-zinc-300 leading-relaxed space-y-3">
+                          {section.content}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 space-y-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-white">Got feedback or an idea?</h3>
+                  <p className="text-xs text-zinc-400 mt-1">
+                    I'm actively building this and genuinely open to feedback. If something's confusing, broken, or you've got an idea for a feature, drop me an email or a message on LinkedIn, I'll try to build it as soon as I can if it fits the stack.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <a
+                    href="mailto:rishindra.tech@gmail.com"
+                    className="inline-flex items-center gap-1.5 bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 hover:text-white px-4 py-2.5 rounded border border-zinc-700 hover:border-zinc-600 transition-colors cursor-pointer"
+                  >
+                    <Mail size={14} /> Email me
+                  </a>
+                  <a
+                    href="https://www.linkedin.com/in/rishindra-mateti-tech/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 hover:text-white px-4 py-2.5 rounded border border-zinc-700 hover:border-zinc-600 transition-colors cursor-pointer"
+                  >
+                    <Contact size={14} /> Message on LinkedIn
+                  </a>
+                </div>
+
+                <hr className="border-zinc-800" />
+
+                <div>
+                  <h3 className="text-sm font-semibold text-white">Curious what else I've built?</h3>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <a
+                    href="https://rishindramateti.online/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 bg-[#4d8565]/10 hover:bg-[#4d8565]/20 text-xs font-semibold text-[#8fc7a4] px-4 py-2.5 rounded border border-[#4d8565]/30 transition-colors cursor-pointer"
+                  >
+                    <Globe size={14} /> View my portfolio
+                  </a>
+                  <a
+                    href="https://github.com/rishindra-mateti-tech/networKING.agent"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 hover:text-white px-4 py-2.5 rounded border border-zinc-700 hover:border-zinc-600 transition-colors cursor-pointer"
+                  >
+                    <Code2 size={14} /> View on GitHub
+                  </a>
+                </div>
+              </div>
             </div>
-            <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-6 space-y-4 text-xs text-zinc-300 leading-relaxed">
-              <ol className="space-y-3 list-decimal list-inside">
-                <li>
-                  Go to{" "}
-                  <a href="https://api.slack.com/apps" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:text-emerald-300 font-mono">
-                    api.slack.com/apps
-                  </a>{" "}
-                  and sign in to the Slack workspace you want notifications in.
-                </li>
-                <li>Click <strong className="text-white">Create New App</strong> &rarr; <strong className="text-white">From scratch</strong>, give it a name, and pick your workspace.</li>
-                <li>In the app settings sidebar, click <strong className="text-white">Incoming Webhooks</strong>, then toggle it <strong className="text-white">On</strong>.</li>
-                <li>Click <strong className="text-white">Add New Webhook to Workspace</strong>, pick the channel you want drafts posted to, and authorize it.</li>
-                <li>Copy the generated URL, it looks like <span className="font-mono text-zinc-100 break-all">https://hooks.slack.com/services/T000/B000/xxxxxxxx</span>.</li>
-                <li>Paste it into the Slack Incoming Webhook URL field in Settings, it saves automatically. Click "Test Slack Connection" to confirm.</li>
-              </ol>
-            </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* VIEW E: INSIGHTS / ANALYTICS */}
         {currentView === "pipeline" && homeTab === "dashboard" && (
