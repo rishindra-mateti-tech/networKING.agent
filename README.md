@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
-  <a href="https://frontend-psi-seven-fptzxsze1f.vercel.app"><img alt="Live demo" src="https://img.shields.io/badge/demo-live-2ea44f"></a>
+  <a href="https://networking-s-agent.vercel.app"><img alt="Live demo" src="https://img.shields.io/badge/demo-live-2ea44f"></a>
   <img alt="Backend" src="https://img.shields.io/badge/backend-FastAPI-009688?logo=fastapi&logoColor=white">
   <img alt="Frontend" src="https://img.shields.io/badge/frontend-Next.js-000000?logo=next.js&logoColor=white">
   <img alt="AI" src="https://img.shields.io/badge/AI-Google%20Gemini-4285F4?logo=googlegemini&logoColor=white">
@@ -16,7 +16,7 @@
 so the message is specific instead of "loved your profile!". You still read,
 edit, and personally send every single one.**
 
-**[Live demo](https://frontend-psi-seven-fptzxsze1f.vercel.app)** — needs your
+**[Live demo](https://networking-s-agent.vercel.app)** — needs your
 own free Gemini API key to actually run anything (get one from
 [Google AI Studio](https://aistudio.google.com/apikey), see "Running it
 locally" below).
@@ -76,12 +76,24 @@ copy-pasted and sent by a human, by design.
 3. It drafts several message options, tuned so a VP's inbox gets treated
    differently from a recruiter's, and none of them are allowed to use
    AI-cliché phrases like "hope this finds you well" or "quick chat".
-4. Everything lands in a Kanban board (Pending → Draft Ready → Sent →
+4. Everything lands in a pipeline board (Pending → Draft Ready → Sent →
    Replied → Closed) so you can track a real pipeline instead of losing
    track of who you talked to. Re-uploading the same person later
-   refreshes their profile instead of creating a duplicate card.
-5. You review, personalize further if needed, and send it yourself, from
-   your own LinkedIn account, like a person.
+   refreshes their profile instead of creating a duplicate card. A
+   "Categorize" view can group that list by date, week, seniority, or
+   match score instead of one flat list.
+5. Optional Telegram/Slack notifications ping you the moment a draft is
+   ready, so you don't have to sit watching the dashboard, each one can
+   be turned off independently without losing the saved token/webhook.
+6. You review, personalize further if needed, and send it yourself, from
+   your own LinkedIn account, like a person. A separate email-draft path
+   supports picking contact status (cold, already messaged, they
+   replied), tone modifiers, and length, plus free-text instructions,
+   for people you'd rather email than DM.
+
+New to the app? The in-app "FAQs" page (with a "Quick Setup Guide"
+walking through the whole flow as diagrams) covers all of this without
+needing to read this README.
 
 ## How it's built, and why
 

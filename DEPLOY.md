@@ -5,7 +5,7 @@ pings from cron-job.org, frontend on Vercel. Every piece of this is free
 with no credit card required anywhere.
 
 **Live right now:**
-- Frontend: https://frontend-psi-seven-fptzxsze1f.vercel.app
+- Frontend: https://networking-s-agent.vercel.app
 - Backend: https://networking-agent-api.onrender.com
 - Neon project: `networking-agent` (org "Rishindra", AWS US East 2)
 - Keep-alive: cron-job.org job "keep networking-agent awake", every 10 min
@@ -112,7 +112,11 @@ Deploy:
 vercel --prod
 ```
 
-You'll get a URL like `https://networking-agent.vercel.app`.
+You'll get a URL like `https://networking-s-agent.vercel.app` (Vercel
+picks the exact subdomain from your Project Name in Settings -> General,
+lowercase letters/digits/hyphens only; you can rename it there and then
+edit the domain under Settings -> Domains -> Edit if you want a
+different one after the fact).
 
 ### Auto-deploy on every push
 
@@ -138,12 +142,16 @@ Go back to Render, open the service's Environment tab, and update
 `CORS_ORIGINS` to your real Vercel URL:
 
 ```
-CORS_ORIGINS=https://networking-agent.vercel.app
+CORS_ORIGINS=https://networking-s-agent.vercel.app
 ```
 
 (Comma-separate if you also want `http://localhost:3000` in there for
 local dev against the prod backend.) Save, Render redeploys automatically
 with the new value.
+
+If you rename the Vercel domain again later, this is the value that
+needs to change to match, or the frontend's API calls will get blocked
+by CORS even though both services are otherwise fine.
 
 ## 6. Verify end to end
 
