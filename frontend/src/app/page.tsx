@@ -439,6 +439,11 @@ export default function Home() {
     if (savedView && validViews.includes(savedView)) {
       setCurrentView(savedView as typeof currentView);
     }
+    const validCategories: ConnCategory[] = ["none", "date", "week", "seniority", "score"];
+    const savedCategory = localStorage.getItem("categorizeBy");
+    if (savedCategory && (validCategories as string[]).includes(savedCategory)) {
+      setCategorizeBy(savedCategory as ConnCategory);
+    }
   }, []);
 
   // Sync data when token updates
@@ -1919,7 +1924,7 @@ export default function Home() {
                     ] as { key: ConnCategory; label: string }[]).map(opt => (
                       <button
                         key={opt.key}
-                        onClick={() => { setCategorizeBy(opt.key); setOpenBuckets([]); setCategorizeMenuOpen(false); }}
+                        onClick={() => { setCategorizeBy(opt.key); localStorage.setItem("categorizeBy", opt.key); setOpenBuckets([]); setCategorizeMenuOpen(false); }}
                         className={`w-full text-left px-3 py-2 text-xs transition-colors cursor-pointer ${
                           categorizeBy === opt.key ? "bg-white/10 text-white" : "text-zinc-300 hover:bg-white/5"
                         }`}
