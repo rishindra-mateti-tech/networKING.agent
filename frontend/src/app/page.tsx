@@ -7,7 +7,7 @@ import {
   Send, RefreshCw, Check, Copy, Clipboard, FileText, ArrowRight, MessageSquare, AlertCircle,
   Zap, Loader2, Menu, X, BarChart3, ImagePlus, Sparkles, Mail, ExternalLink, ChevronDown, ChevronRight,
   Code2, Contact, Globe, Pencil, Link2, ShieldCheck, Bell, Target, MessageCircle,
-  HelpCircle, ListFilter, Workflow
+  HelpCircle, ListFilter, Workflow, Maximize2
 } from "lucide-react";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -3492,8 +3492,13 @@ export default function Home() {
 
               <div className="space-y-5">
                 {diagrams.map(d => (
-                  <div key={d.src} className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl overflow-hidden">
-                    <img src={d.src} alt={d.alt} loading="lazy" className="w-full h-auto block" />
+                  <div key={d.src} className="-mx-4 sm:mx-0 bg-white/[0.05] backdrop-blur-xl border-y sm:border border-white/[0.14] sm:rounded-xl overflow-hidden">
+                    <a href={d.src} target="_blank" rel="noopener noreferrer" className="relative block group" title="Tap to view full size">
+                      <img src={d.src} alt={d.alt} loading="lazy" className="w-full h-auto block" />
+                      <span className="absolute bottom-2 right-2 flex items-center gap-1 text-[10px] font-semibold bg-black/60 text-white px-2 py-1 rounded-md opacity-80 group-active:opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                        <Maximize2 size={11} /> Full size
+                      </span>
+                    </a>
                     <p className="text-xs text-zinc-400 px-5 py-3 border-t border-white/5">{d.caption}</p>
                   </div>
                 ))}
