@@ -1301,6 +1301,8 @@ def generate_email_draft(
         contact_status=body.contact_status,
         style_modifiers=body.style_modifiers,
         conversation_context=conversation_context,
+        length=body.length,
+        custom_instructions=body.custom_instructions,
     )
 
     conn.generated_email_subject = result["subject"]

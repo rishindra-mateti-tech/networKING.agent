@@ -176,9 +176,12 @@ class InteractionLogOut(BaseModel):
 # --- Email Draft Schemas ---
 # contact_status: "standard" (default) | "cold" | "messaged_no_reply" | "messaged_replied"
 # style_modifiers: any of "referral", "punchy_opener"
+# length: "short" | "mid" (default) | "long"
 class EmailDraftRequest(BaseModel):
     contact_status: str = "standard"
     style_modifiers: List[str] = []
+    length: str = "mid"
+    custom_instructions: str = ""
 
     class Config:
         from_attributes = True

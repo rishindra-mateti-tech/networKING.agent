@@ -303,6 +303,8 @@ export default function Home() {
   const [emailDraftModalConn, setEmailDraftModalConn] = useState<any | null>(null);
   const [emailContactStatus, setEmailContactStatus] = useState("standard");
   const [emailStyleModifiers, setEmailStyleModifiers] = useState<string[]>([]);
+  const [emailLength, setEmailLength] = useState("mid");
+  const [emailCustomInstructions, setEmailCustomInstructions] = useState("");
   const uploadsScreenshotInputRef = useRef<HTMLInputElement>(null);
   const [uploadsScreenshotTargetId, setUploadsScreenshotTargetId] = useState<number | null>(null);
 
@@ -1012,14 +1014,14 @@ export default function Home() {
 
   const handleGenerateEmail = async (
     connId: number,
-    draftOptions?: { contact_status: string; style_modifiers: string[] }
+    draftOptions?: { contact_status: string; style_modifiers: string[]; length?: string; custom_instructions?: string }
   ) => {
     setEmailDraftLoadingId(connId);
     try {
       const res = await fetchWithAuth(`/api/connections/${connId}/generate-email`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draftOptions || { contact_status: "standard", style_modifiers: [] }),
+        body: JSON.stringify(draftOptions || { contact_status: "standard", style_modifiers: [], length: "mid", custom_instructions: "" }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -1040,6 +1042,8 @@ export default function Home() {
   const openEmailDraftPicker = (conn: any) => {
     setEmailContactStatus(conn.conversation_verdict ? "messaged_replied" : "standard");
     setEmailStyleModifiers([]);
+    setEmailLength("mid");
+    setEmailCustomInstructions("");
     setEmailDraftModalConn(conn);
   };
 
@@ -1048,6 +1052,8 @@ export default function Home() {
     handleGenerateEmail(emailDraftModalConn.id, {
       contact_status: emailContactStatus,
       style_modifiers: emailStyleModifiers,
+      length: emailLength,
+      custom_instructions: emailCustomInstructions,
     });
     setEmailDraftModalConn(null);
   };
@@ -4122,7 +4128,7 @@ export default function Home() {
           the picked combination gets generated, not every option at once. */}
       {emailDraftModalConn && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
-          <div className="bg-zinc-950/95 backdrop-blur-xl border border-white/10 rounded-2xl max-w-md w-full shadow-2xl p-6 space-y-5">
+          <div className="bg-zinc-950/95 backdrop-blur-xl border border-white/10 rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl p-6 space-y-5">
             <div>
               <h3 className="text-base font-bold text-white">Draft an email for {emailDraftModalConn.name}</h3>
               <p className="text-xs text-zinc-500 mt-1">
@@ -4193,6 +4199,44 @@ export default function Home() {
                   </button>
                 );
               })}
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-[10px] text-zinc-500 font-semibold uppercase tracking-wider mb-1">
+                Length
+              </label>
+              <div className="grid grid-cols-3 gap-1.5">
+                {[
+                  { value: "short", label: "Short and direct" },
+                  { value: "mid", label: "Mid size" },
+                  { value: "long", label: "No limit" },
+                ].map(opt => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setEmailLength(opt.value)}
+                    className={`px-2 py-2.5 rounded-lg border text-[11px] font-semibold text-center transition-colors cursor-pointer ${
+                      emailLength === opt.value
+                        ? "bg-[#4d8565]/10 border-[#4d8565]/40 text-white"
+                        : "bg-white/[0.02] border-white/10 text-zinc-400 hover:border-white/20"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-[10px] text-zinc-500 font-semibold uppercase tracking-wider mb-1">
+                Anything else? (optional)
+              </label>
+              <textarea
+                value={emailCustomInstructions}
+                onChange={e => setEmailCustomInstructions(e.target.value)}
+                rows={3}
+                placeholder="Explain your situation, tell it what to mention, or say exactly how you want this email written."
+                className="w-full bg-black border border-white/10 rounded-lg px-3 py-2.5 text-xs text-zinc-200 focus:outline-none focus:border-[#4d8565]/50 focus:ring-1 focus:ring-[#4d8565]/30 transition-colors resize-none"
+              />
             </div>
 
             <div className="flex items-center justify-end gap-2 pt-1">

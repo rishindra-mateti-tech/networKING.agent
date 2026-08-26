@@ -881,6 +881,37 @@ CONTACT_STATUS_MESSAGED_REPLIED = "messaged_replied"
 MODIFIER_REFERRAL = "referral"
 MODIFIER_PUNCHY_OPENER = "punchy_opener"
 
+LENGTH_SHORT = "short"
+LENGTH_MID = "mid"
+LENGTH_LONG = "long"
+
+
+def _length_instruction(length: str) -> str:
+    """
+    The old fixed 80-130 word cap was making every email feel clipped, even
+    ones with a real reason to run longer (a referral ask needs a sentence
+    more than a technical question does, a reply to a genuine reply thread
+    earns more room than a cold open). Length is now the user's call.
+    """
+    if length == LENGTH_SHORT:
+        return (
+            "- Length: short and direct, 50 to 90 words in the body. Say the one thing and stop. Cut "
+            "every sentence that isn't the hook, the one line of context, and the ask.\n"
+        )
+    if length == LENGTH_LONG:
+        return (
+            "- Length: no strict word cap. Take the room you actually need to make the point properly, "
+            "a second concrete detail, a fuller thought, more of the honest voice. This is permission to "
+            "not cut a sentence that's earning its place, not permission to pad or ramble. Every sentence "
+            "still has to be one a real person would say, and it should still feel tight for its length, "
+            "not stretched. If the honest version is short, it's fine for it to stay short.\n"
+        )
+    # LENGTH_MID (default): a bit more breathing room than the old hard cap.
+    return (
+        "- Length: 110 to 160 words in the body. Enough room for the hook, one real line of context, "
+        "and an ask that doesn't feel rushed. Still tight, not padded.\n"
+    )
+
 
 def _contact_status_block(contact_status: str, sender_name: str) -> str:
     """
@@ -960,6 +991,8 @@ def generate_outreach_email(
     contact_status: str = CONTACT_STATUS_STANDARD,
     style_modifiers: Optional[List[str]] = None,
     conversation_context: str = "",
+    length: str = LENGTH_MID,
+    custom_instructions: str = "",
 ) -> dict:
     """
     Writes a real outreach EMAIL (subject + body), distinct from the short-form
@@ -973,9 +1006,12 @@ def generate_outreach_email(
     replied), since that changes what's honest to say in the opening lines.
     `style_modifiers` are additive choices on top of that (asking for a
     referral, a punchier opening) the user can pick regardless of contact
-    status. Both are surfaced as an explicit picker in the UI rather than
-    generating every combination up front, since most of them are irrelevant
-    to any given person.
+    status. `length` controls how much room the email gets. `custom_instructions`
+    is free text the user typed about this specific email (a situation to
+    explain, a thing to mention, an instruction of their own), weighed
+    alongside everything else rather than replacing it. All of these are
+    surfaced as an explicit picker in the UI rather than generating every
+    combination up front, since most of them are irrelevant to any given person.
     """
     style_modifiers = style_modifiers or []
     try:
@@ -1059,8 +1095,7 @@ def generate_outreach_email(
         "'Reaching Out', 'Connecting', 'Introduction', exclamation marks, or emoji.\n"
         "- The ask must be small, singular, and answerable in two sentences without scheduling anything. "
         "One ask per email.\n"
-        "- 80 to 130 words in the body. Shorter than feels comfortable. If it does not fit on a phone "
-        "screen without scrolling, cut it.\n"
+        + _length_instruction(length) +
         "- End on the ask or a light out ('no worries if not'), never on a sign-off cliche.\n\n"
 
         "HOW TO SOUND HUMAN AND NOT LIKE A LANGUAGE MODEL:\n"
@@ -1180,6 +1215,18 @@ def generate_outreach_email(
     {conversation_context}
     """
 
+    custom_instructions_section = ""
+    if custom_instructions.strip():
+        custom_instructions_section = f"""
+    THE USER'S OWN INSTRUCTIONS FOR THIS SPECIFIC EMAIL, WEIGH THIS ALONGSIDE EVERYTHING ELSE ABOVE, IT DOES
+    NOT REPLACE IT:
+    {custom_instructions.strip()}
+    Treat anything here about the sender or the situation (timing, a fact not in the profile above, a
+    specific thing to mention, an instruction about tone or approach) as true and worth using, the user is
+    the authority on their own situation. It does not grant permission to invent anything about the
+    RECIPIENT that isn't in the research above, the honesty rules there still apply to them.
+    """
+
     prompt = f"""
     WHO IS WRITING THIS EMAIL (the user). Every factual claim about the sender must come from here:
     {twin_profile}
@@ -1210,6 +1257,7 @@ def generate_outreach_email(
     - Motivation / career pattern: {personalization.get("motivation_hooks")}
     - Avoid mentioning: {personalization.get("avoid_points")}
     {conversation_section}
+    {custom_instructions_section}
     Write one email. Respect the strategy above, especially the DO NOTs, UNLESS the referral style requirement
     above is active, in which case the ask is the referral and this paragraph's guidance about what kind of ask
     fits their seniority does not apply, the referral requirement wins regardless of seniority or role. If the
@@ -1219,8 +1267,9 @@ def generate_outreach_email(
     would enjoy answering.
 
     Before you write, decide the single most specific true thing you know about this person, and build the
-    hook on that. If the only honest answer is "not much", use the honest open and keep the whole email under
-    70 words rather than padding it with invented familiarity.
+    hook on that. If the only honest answer is "not much", use the honest open and keep the whole email on
+    the short side rather than padding it with invented familiarity, even if a longer length was picked
+    below, since an honest short email always beats a padded long one.
 
     Write the body first, then write the subject from whatever the body actually ended up asking.
 
@@ -1232,7 +1281,7 @@ def generate_outreach_email(
       - Do the subject and the hook point at the same thing? If they are about different topics, rewrite the
         subject to match the body.
       - Is there a real question or unresolved thread that makes replying feel natural?
-      - Is the body under 130 words?
+      - {"Is the body between 50 and 90 words?" if length == LENGTH_SHORT else "Is the body between 110 and 160 words?" if length == LENGTH_MID else "Does the length actually earn its place, no padding or repeated points, even though there's no hard cap?"}
       - Are there any em dashes? There must be none.
       - Does the word "Unknown" appear anywhere, or does any sentence reference a field you didn't actually have
         data for? If yes, rewrite that sentence using only confirmed facts.
