@@ -467,7 +467,7 @@ def extract_linkedin_profile_metadata(pdf_text: str) -> dict:
         "current_title": None,
         "company": None,
         "location": None,
-        "connection_count": 500,  # Default
+        "connection_count": None,  # Only set below if the PDF text actually states a count
         "years_experience": 0.0,
         "current_company_years_experience": None,
         "profile_url": None,

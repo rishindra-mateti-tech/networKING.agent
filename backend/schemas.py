@@ -37,7 +37,7 @@ class ConnectionCreate(BaseModel):
     current_title: Optional[str] = None
     company: Optional[str] = None
     location: Optional[str] = None
-    connection_count: Optional[int] = 0
+    connection_count: Optional[int] = None
     years_experience: Optional[float] = 0.0
     profile_text: Optional[str] = None
     posts_text: Optional[str] = None
@@ -53,7 +53,7 @@ class ConnectionOut(BaseModel):
     current_title: Optional[str] = None
     company: Optional[str] = None
     location: Optional[str] = None
-    connection_count: int
+    connection_count: Optional[int] = None
     years_experience: float
     current_company_years_experience: Optional[float] = None
     profile_text: Optional[str] = None

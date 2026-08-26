@@ -99,8 +99,14 @@ def validate_api_key(api_key: str) -> dict:
 def run_profile_intelligence_agent(api_key: str, name: str, profile_text: str, posts_text: str, screenshot_path: str = None, posts_screenshot_path: str = None) -> dict:
     """
     Agent 1: Profile Intelligence Agent
-    Extracts name, role (title), seniority, company, follower count, connection count, education,
-    technologies, mutual interests, recent posts, hiring badge status (ON/OFF), and screenshot visual details.
+    Extracts name, role (title), seniority, company, follower count, education,
+    technologies, mutual interests, recent posts, and screenshot visual details.
+
+    Connection count and hiring-badge status are deliberately NOT guessed here:
+    a text-only model reading an exported PDF has no reliable way to see
+    LinkedIn's visual "Open to Work"/"Hiring" badge, and connection count is
+    either explicitly stated in the text (parsed separately, see parser.py)
+    or left for the user to enter, never invented.
     """
     system_instruction = (
         "You are a Profile Intelligence Agent. Your job is to extract detailed professional profile details "
@@ -125,7 +131,6 @@ def run_profile_intelligence_agent(api_key: str, name: str, profile_text: str, p
     - "seniority": Seniority category. Must be one of: "CEO", "Founder", "Recruiter", "Senior SWE", "Principal Engineer", "Engineering Manager", "University Alum", "HR", "VP", "Director", "Other".
     - "company": Current company name.
     - "follower_count": Candidate's follower count if visible (e.g. "1,200", "50k", or "Under 500"). If not found, output "Under 500".
-    - "connection_count": Candidate's connections count (integer or "500+").
     - "years_experience": Approximate TOTAL years of professional experience across their entire career,
       every employer combined (float/number).
     - "current_company_years_experience": Approximate years spent at their CURRENT company specifically
@@ -141,7 +146,6 @@ def run_profile_intelligence_agent(api_key: str, name: str, profile_text: str, p
     - "recent_posts": Summary of their recent activities/posts if provided.
     - "tone": Tone of their writing or posts (e.g., direct, technical, academic, casual).
     - "company_size": Estimate company size category: "Enterprise", "Mid-size", "Startup", "Scaleup".
-    - "hiring_badge_status": Inferred "Open to Work" or "Hiring" banner/badge status. Output "ON" if they have an active "Open to Work" or "Hiring" badge, otherwise output "OFF".
     - "hiring_probability": Assessment of their likelihood of hiring (e.g., "High", "Medium", "Low", "Unknown").
     - "best_conversation_angle": One of: "Job Referral", "Learning", "Project Curiosity", "Shared Domain", "Alumni Path".
     - "screenshot_observations": Any interesting visual detail extracted from the screenshot (e.g. active hiring banner, featured projects, specific certifications, activity). Write "None" if no screenshot is provided.
@@ -176,7 +180,6 @@ def run_profile_intelligence_agent(api_key: str, name: str, profile_text: str, p
             "seniority": data.get("seniority", "Other"),
             "company": clean_unicode_text(data.get("company", "")),
             "follower_count": data.get("follower_count", "Under 500"),
-            "connection_count": data.get("connection_count", "0"),
             "years_experience": float(data.get("years_experience") or 0.0),
             "current_company_years_experience": float(data.get("current_company_years_experience") or 0.0),
             "education": clean_unicode_text(data.get("education", "")),
@@ -185,7 +188,6 @@ def run_profile_intelligence_agent(api_key: str, name: str, profile_text: str, p
             "recent_posts": clean_unicode_text(data.get("recent_posts", "")),
             "tone": clean_unicode_text(data.get("tone", "")),
             "company_size": data.get("company_size", "Startup"),
-            "hiring_badge_status": data.get("hiring_badge_status", "OFF"),
             "hiring_probability": data.get("hiring_probability", "Unknown"),
             "best_conversation_angle": data.get("best_conversation_angle", "Shared Domain"),
             "screenshot_observations": clean_unicode_text(data.get("screenshot_observations", "None"))
@@ -199,7 +201,6 @@ def run_profile_intelligence_agent(api_key: str, name: str, profile_text: str, p
             "seniority": "Other",
             "company": "Company",
             "follower_count": "Under 500",
-            "connection_count": "0",
             "years_experience": 0.0,
             "current_company_years_experience": 0.0,
             "education": "",
@@ -208,7 +209,6 @@ def run_profile_intelligence_agent(api_key: str, name: str, profile_text: str, p
             "recent_posts": "",
             "tone": "professional",
             "company_size": "Startup",
-            "hiring_badge_status": "OFF",
             "hiring_probability": "Unknown",
             "best_conversation_angle": "Shared Domain",
             "screenshot_observations": "None"
@@ -291,29 +291,38 @@ def run_company_intelligence_agent(api_key: str, profile_json: dict) -> dict:
         }
 
 
-def run_relationship_strategy_agent(api_key: str, profile_json: dict, company_json: dict) -> dict:
+def run_relationship_strategy_agent(api_key: str, profile_json: dict, company_json: dict, connection_count: Optional[int] = None, hiring_badge_status: Optional[str] = None) -> dict:
     """
     Agent 3: Relationship Strategy Agent
     Decides the best outreach approach, calculates key networking metrics (networking score, reply probability,
     decision maker status, networking difficulty, referral potential, hiring probability), and establishes strict DOs and DONTs.
+
+    connection_count and hiring_badge_status come from the Connection row itself (a real
+    parsed "N connections" match, or a value the user entered manually), never from a
+    model guess. When neither is available they're passed through as None, in which case
+    the prompt is told outright to leave them out of the score rather than defaulting to
+    a number or status that was never actually confirmed.
     """
     system_instruction = (
         "You are a Relationship Strategy Agent. Your job is to decide the best outreach approach, "
         "calculate networking intelligence metrics, and establish strict DOs and DONTs rules based on the candidate's seniority and company context."
     )
 
+    connection_count_line = str(connection_count) if connection_count is not None else "Not provided, do not factor this into the score."
+    hiring_badge_line = hiring_badge_status if hiring_badge_status else "Not provided, do not factor this into the score or hiring_probability_score."
+
     prompt = f"""
     Determine the relationship strategy and networking metrics for contacting the following candidate:
-    
+
     CANDIDATE PROFILE:
     - Name: {profile_json.get("name")}
     - Seniority Category: {profile_json.get("seniority")}
     - Role: {profile_json.get("role")}
     - Company: {profile_json.get("company")}
     - Follower Count: {profile_json.get("follower_count")}
-    - Connection Count: {profile_json.get("connection_count")}
-    - Hiring Badge Status: {profile_json.get("hiring_badge_status")}
-    
+    - Connection Count: {connection_count_line}
+    - Hiring Badge Status: {hiring_badge_line}
+
     COMPANY DETAILS:
     - Company Type: {company_json.get("company_type")}
     - Company Stage: {company_json.get("company_stage")}
@@ -739,20 +748,24 @@ def run_message_writing_agent(
         raise e
 
 
-def analyze_candidate_bridge(api_key: str, twin_profile: str, candidate_name: str, candidate_profile: str, candidate_posts: str, screenshot_path: str = None, posts_screenshot_path: str = None) -> dict:
+def analyze_candidate_bridge(api_key: str, twin_profile: str, candidate_name: str, candidate_profile: str, candidate_posts: str, screenshot_path: str = None, posts_screenshot_path: str = None, connection_count: Optional[int] = None, hiring_badge_status: Optional[str] = None) -> dict:
     """
     Stage 1: Multi-Agent Analysis Pipeline.
     Runs Profile Agent, Company Agent, Relationship Strategy Agent, Personalization Agent, and Context Synthesizer.
     Returns a unified dict containing structured JSONs, metrics, and retro-compatible keys.
+
+    connection_count and hiring_badge_status are the real values off the Connection row
+    (parsed from the PDF or entered by the user), passed straight through to the
+    Relationship Strategy Agent instead of letting it re-guess either one.
     """
     # 1. Profile Intelligence
     profile_intel = run_profile_intelligence_agent(api_key, candidate_name, candidate_profile, candidate_posts, screenshot_path, posts_screenshot_path)
-    
+
     # 2. Company Intelligence
     company_intel = run_company_intelligence_agent(api_key, profile_intel)
-    
+
     # 3. Strategy
-    strategy_intel = run_relationship_strategy_agent(api_key, profile_intel, company_intel)
+    strategy_intel = run_relationship_strategy_agent(api_key, profile_intel, company_intel, connection_count, hiring_badge_status)
     
     # 4. Personalization Hooks
     personalization_hooks = run_personalization_agent(api_key, profile_intel, company_intel, profile_intel.get("screenshot_observations"))

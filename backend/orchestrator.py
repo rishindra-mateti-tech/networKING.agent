@@ -377,20 +377,18 @@ class QueueOrchestrator:
                             candidate_profile=connection.profile_text or "",
                             candidate_posts=connection.posts_text or "",
                             screenshot_path=connection.screenshot_path,
-                            posts_screenshot_path=connection.posts_screenshot_path
+                            posts_screenshot_path=connection.posts_screenshot_path,
+                            connection_count=connection.connection_count,
+                            hiring_badge_status=connection.hiring_badge_status
                         )
-                        
-                        # Sync manually specified hiring_badge_status if set, and backfill
-                        # name/title/company from the AI's own extraction when the PDF
-                        # metadata heuristic (parser.py) failed to find them. Gemini reads
+
+                        # Backfill name/title/company from the AI's own extraction when the
+                        # PDF metadata heuristic (parser.py) failed to find them. Gemini reads
                         # the same raw text with far more context than the regex heuristic,
                         # so it often gets the name right even when the heuristic didn't.
                         try:
                             import json as j
                             p_intel = j.loads(bridge_data.get("profile_intelligence") or "{}")
-                            if connection.hiring_badge_status:
-                                p_intel["hiring_badge_status"] = connection.hiring_badge_status
-                                bridge_data["profile_intelligence"] = j.dumps(p_intel)
 
                             ai_name = (p_intel.get("name") or "").strip()
                             if ai_name and connection.name in (None, "", "Unknown Candidate"):

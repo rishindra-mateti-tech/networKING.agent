@@ -30,7 +30,7 @@ class Connection(Base):
     current_title = Column(String, nullable=True)
     company = Column(String, nullable=True)
     location = Column(String, nullable=True)
-    connection_count = Column(Integer, default=0)
+    connection_count = Column(Integer, nullable=True)  # left null until the user or a parsed PDF actually states one
     years_experience = Column(Float, default=0.0)  # total career experience, every employer combined
     current_company_years_experience = Column(Float, nullable=True)  # tenure at their CURRENT company only, set by the AI pipeline
     
