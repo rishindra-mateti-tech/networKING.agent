@@ -3237,12 +3237,31 @@ export default function Home() {
                     <Globe size={14} /> View my portfolio
                   </a>
                   <a
-                    href="https://github.com/rishindra-mateti-tech/networKING.agent"
+                    href="https://github.com/rishindra-mateti-tech"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1.5 bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 hover:text-white px-4 py-2.5 rounded border border-zinc-700 hover:border-zinc-600 transition-colors cursor-pointer"
                   >
                     <Code2 size={14} /> View on GitHub
+                  </a>
+                </div>
+
+                <hr className="border-zinc-800" />
+
+                <div>
+                  <h3 className="text-sm font-semibold text-white">Support me</h3>
+                  <p className="text-xs text-zinc-400 mt-1">
+                    By giving a star to this repository.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <a
+                    href="https://github.com/rishindra-mateti-tech/networKING.agent"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 bg-amber-950/20 hover:bg-amber-950/30 text-xs font-semibold text-amber-400 px-4 py-2.5 rounded border border-amber-900/40 transition-colors cursor-pointer"
+                  >
+                    <Star size={14} /> Star this repository
                   </a>
                 </div>
               </div>
