@@ -341,6 +341,11 @@ export default function Home() {
     if (localToken) {
       setToken(localToken);
     }
+    const validViews = ["pipeline", "twinagent", "apikeys", "settings", "insights", "uploads", "faq"];
+    const savedView = localStorage.getItem("currentView");
+    if (savedView && validViews.includes(savedView)) {
+      setCurrentView(savedView as typeof currentView);
+    }
   }, []);
 
   // Sync data when token updates
@@ -1337,6 +1342,7 @@ export default function Home() {
   // --- SAAS DASHBOARD INTERFACE ---
   const goToView = (view: "pipeline" | "twinagent" | "apikeys" | "settings" | "insights" | "uploads" | "faq") => {
     setCurrentView(view);
+    localStorage.setItem("currentView", view);
     setSelectedConnection(null);
     setMobileNavOpen(false);
   };
@@ -3259,7 +3265,7 @@ export default function Home() {
                     href="https://github.com/rishindra-mateti-tech/networKING.agent"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 bg-amber-950/20 hover:bg-amber-950/30 text-xs font-semibold text-amber-400 px-4 py-2.5 rounded border border-amber-900/40 transition-colors cursor-pointer"
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-400 hover:text-amber-300 transition-colors cursor-pointer"
                   >
                     <Star size={14} /> Star this repository
                   </a>
