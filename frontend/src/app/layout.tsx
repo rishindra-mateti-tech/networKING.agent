@@ -19,6 +19,7 @@ const caveat = Caveat({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://networking-s-agent.vercel.app"),
   title: "networKING.agent | Relationship & Outreach Dashboard",
   description: "Intelligent, paced outreach queue and relationship funnel manager.",
   icons: {
@@ -28,6 +29,9 @@ export const metadata: Metadata = {
       { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
     ],
     apple: "/apple-touch-icon.png",
+  },
+  twitter: {
+    card: "summary_large_image",
   },
 };
 
