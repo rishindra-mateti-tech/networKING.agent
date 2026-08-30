@@ -29,6 +29,10 @@ class Connection(Base):
     name = Column(String, index=True, nullable=False)
     current_title = Column(String, nullable=True)
     company = Column(String, nullable=True)
+    # True once the user has explicitly set/corrected the company (e.g. via the
+    # Redraft dialog), so a later automatic reprocessing pass (re-uploaded PDF)
+    # never lets the AI silently re-guess and overwrite that choice again.
+    company_locked = Column(Boolean, default=False)
     location = Column(String, nullable=True)
     connection_count = Column(Integer, nullable=True)  # left null until the user or a parsed PDF actually states one
     years_experience = Column(Float, default=0.0)  # total career experience, every employer combined

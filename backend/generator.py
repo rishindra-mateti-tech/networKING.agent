@@ -534,6 +534,7 @@ def run_message_writing_agent(
     twin_profile: str,
     tone_examples: str,
     sender_name: str = "the user",
+    custom_instructions: Optional[str] = None,
 ) -> dict:
     """
     Agent 5: Message Writing Agent
@@ -542,6 +543,11 @@ def run_message_writing_agent(
     the currently signed-in account -- this app is multi-tenant, so this must never be hardcoded).
     Fills in the candidate's actual name and company instead of outputting placeholders like [Name].
     No conversational clichés are allowed. Follows explicit strategy guidelines.
+
+    custom_instructions, when set, is the user's own free-text redraft request
+    (e.g. "make the coffee chat draft shorter", "mention I'm open to relocating")
+    and takes priority over the default style/length/angle choices below when
+    the two conflict.
     """
     candidate_name = profile_json.get("name", "there")
     candidate_company = profile_json.get("company", "your company")
@@ -600,7 +606,12 @@ def run_message_writing_agent(
     - Context Summary: {context_summary}
     - Explicit DOs: {strategy_json.get("dos")}
     - Explicit DONTs: {strategy_json.get("donts")}
-    
+    {f'''
+    USER'S REDRAFT INSTRUCTIONS (highest priority -- override any default style, length,
+    or angle choice below when they conflict with this):
+    {custom_instructions}
+    ''' if custom_instructions else ""}
+
     PERSONALIZATION DETAILS:
     - Motivation Hooks: {personalization_json.get("motivation_hooks")}
     - Conversation Starter: {personalization_json.get("conversation_starter")}
@@ -748,7 +759,7 @@ def run_message_writing_agent(
         raise e
 
 
-def analyze_candidate_bridge(api_key: str, twin_profile: str, candidate_name: str, candidate_profile: str, candidate_posts: str, screenshot_path: str = None, posts_screenshot_path: str = None, connection_count: Optional[int] = None, hiring_badge_status: Optional[str] = None) -> dict:
+def analyze_candidate_bridge(api_key: str, twin_profile: str, candidate_name: str, candidate_profile: str, candidate_posts: str, screenshot_path: str = None, posts_screenshot_path: str = None, connection_count: Optional[int] = None, hiring_badge_status: Optional[str] = None, company_override: Optional[str] = None) -> dict:
     """
     Stage 1: Multi-Agent Analysis Pipeline.
     Runs Profile Agent, Company Agent, Relationship Strategy Agent, Personalization Agent, and Context Synthesizer.
@@ -757,9 +768,17 @@ def analyze_candidate_bridge(api_key: str, twin_profile: str, candidate_name: st
     connection_count and hiring_badge_status are the real values off the Connection row
     (parsed from the PDF or entered by the user), passed straight through to the
     Relationship Strategy Agent instead of letting it re-guess either one.
+
+    company_override, when set, replaces whatever company the Profile Intelligence
+    Agent extracted before any downstream agent sees it. Needed for candidates who
+    hold multiple current titles across companies (e.g. a founder of several
+    startups), where free-text extraction from a PDF/screenshot can't reliably
+    know which one the user means -- the user's explicit choice always wins.
     """
     # 1. Profile Intelligence
     profile_intel = run_profile_intelligence_agent(api_key, candidate_name, candidate_profile, candidate_posts, screenshot_path, posts_screenshot_path)
+    if company_override and company_override.strip():
+        profile_intel["company"] = company_override.strip()
 
     # 2. Company Intelligence
     company_intel = run_company_intelligence_agent(api_key, profile_intel)
@@ -799,7 +818,7 @@ def analyze_candidate_bridge(api_key: str, twin_profile: str, candidate_name: st
     }
 
 
-def generate_outreach_variants(api_key: str, twin_profile: str, candidate_name: str, candidate_profile: str, candidate_posts: str, bridge_data: dict, tone_examples: str = "", sender_name: str = "the user") -> dict:
+def generate_outreach_variants(api_key: str, twin_profile: str, candidate_name: str, candidate_profile: str, candidate_posts: str, bridge_data: dict, tone_examples: str = "", sender_name: str = "the user", custom_instructions: Optional[str] = None) -> dict:
     """
     Stage 2: Message Writing Agent.
     Runs the writing agent using synthesized intermediate outputs.
@@ -821,6 +840,7 @@ def generate_outreach_variants(api_key: str, twin_profile: str, candidate_name: 
         twin_profile=twin_profile,
         tone_examples=tone_examples,
         sender_name=sender_name,
+        custom_instructions=custom_instructions,
     )
 
 

@@ -52,6 +52,7 @@ class ConnectionOut(BaseModel):
     name: str
     current_title: Optional[str] = None
     company: Optional[str] = None
+    company_locked: Optional[bool] = None
     location: Optional[str] = None
     connection_count: Optional[int] = None
     years_experience: float
@@ -182,6 +183,17 @@ class EmailDraftRequest(BaseModel):
     style_modifiers: List[str] = []
     length: str = "mid"
     custom_instructions: str = ""
+
+    class Config:
+        from_attributes = True
+
+# --- Redraft Schema ---
+# company_override: replaces the candidate's company for this and all future
+# generations (see Connection.company_locked). redraft_instructions: one-shot
+# free text applied only to this regeneration pass.
+class RegenerateDraftsRequest(BaseModel):
+    company_override: Optional[str] = None
+    redraft_instructions: Optional[str] = None
 
     class Config:
         from_attributes = True

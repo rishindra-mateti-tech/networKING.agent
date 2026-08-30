@@ -48,6 +48,7 @@ _NEW_CONNECTION_COLUMNS = [
     ("generated_email_body", "TEXT", "TEXT"),
     ("current_company_years_experience", "REAL", "DOUBLE PRECISION"),
     ("posts_screenshot_path", "TEXT", "TEXT"),
+    ("company_locked", "BOOLEAN", "BOOLEAN"),
 ]
 _NEW_INTERACTION_LOG_COLUMNS = [
     ("screenshot_path", "TEXT", "TEXT"),

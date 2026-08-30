@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import html
 import httpx
+import json
 import os
 import secrets
 from typing import List, Optional
@@ -30,6 +31,8 @@ from generator import (
     generate_thread_followup,
     analyze_conversation_screenshot,
     generate_outreach_email,
+    generate_outreach_variants,
+    run_company_intelligence_agent,
     answer_analytics_question,
     generate_twin_understanding,
     chat_about_twin_profile,
@@ -1310,3 +1313,88 @@ def generate_email_draft(
     db.commit()
 
     return {"subject": result["subject"], "body": result["body"]}
+
+
+@app.post("/api/connections/{connection_id}/regenerate", response_model=schemas.ConnectionOut)
+def regenerate_drafts(
+    connection_id: int,
+    body: schemas.RegenerateDraftsRequest = schemas.RegenerateDraftsRequest(),
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Re-writes the 5 LinkedIn DM drafts for a candidate that has already been
+    through initial processing, optionally correcting which company the
+    candidate is being pitched about (for people who hold multiple current
+    titles across companies, where the AI's own extraction can't reliably
+    know which one the user means) and/or applying free-text redraft
+    instructions. Reuses the already-computed profile/strategy/personalization
+    reasoning rather than re-running the whole multi-agent pipeline, since a
+    company or wording change doesn't require redoing that analysis from
+    scratch -- except company classification, which does depend on which
+    company was picked and is cheap to redo.
+    """
+    conn = db.query(models.Connection).filter(
+        models.Connection.id == connection_id,
+        models.Connection.user_id == current_user.id
+    ).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    if not conn.profile_intelligence:
+        raise HTTPException(status_code=400, detail="This candidate hasn't finished initial processing yet.")
+
+    api_key_record = db.query(models.ApiKey).filter(
+        models.ApiKey.user_id == current_user.id,
+        models.ApiKey.is_active == True
+    ).first()
+    if not api_key_record:
+        raise HTTPException(status_code=400, detail="No active API key set for redraft generation.")
+
+    settings_records = db.query(models.Setting).filter(models.Setting.user_id == current_user.id).all()
+    settings = {s.key: s.value for s in settings_records if s.value}
+
+    company_override = (body.company_override or "").strip()
+    if company_override:
+        conn.company = company_override
+        conn.company_locked = True
+
+        profile_intel = json.loads(conn.profile_intelligence or "{}")
+        profile_intel["company"] = company_override
+        conn.profile_intelligence = json.dumps(profile_intel)
+
+        # Company type/stage/culture is specific to which company was picked,
+        # so it has to be re-derived -- reusing the old company's classification
+        # for the newly-selected one would misinform the drafts.
+        company_intel = run_company_intelligence_agent(api_key_record.key_value, profile_intel)
+        conn.company_intelligence = json.dumps(company_intel)
+
+    variants = generate_outreach_variants(
+        api_key=api_key_record.key_value,
+        twin_profile=compile_twin_agent_profile(db, current_user.id),
+        candidate_name=conn.name,
+        candidate_profile=conn.profile_text or "",
+        candidate_posts=conn.posts_text or "",
+        bridge_data={
+            "profile_intelligence": conn.profile_intelligence,
+            "company_intelligence": conn.company_intelligence,
+            "relationship_strategy": conn.relationship_strategy,
+            "personalization_data": conn.personalization_data,
+            "context_summary": conn.context_summary,
+        },
+        tone_examples=settings.get("tone_examples", ""),
+        sender_name=get_sender_name(db, current_user.id),
+        custom_instructions=(body.redraft_instructions or "").strip() or None,
+    )
+
+    conn.generated_outreach_short = variants["short"]
+    conn.generated_outreach_warm = variants["warm"]
+    conn.generated_outreach_tech = variants["tech"]
+    conn.generated_outreach_mixed = variants["mixed"]
+    conn.generated_outreach_referral = variants.get("referral")
+    conn.generated_outreach_coffee = variants.get("coffee")
+    conn.generated_outreach_technical = variants.get("technical")
+    conn.generated_outreach_relationship = variants.get("relationship")
+    conn.generated_outreach_featured = variants.get("featured")
+    db.commit()
+    db.refresh(conn)
+    return conn

@@ -379,7 +379,8 @@ class QueueOrchestrator:
                             screenshot_path=connection.screenshot_path,
                             posts_screenshot_path=connection.posts_screenshot_path,
                             connection_count=connection.connection_count,
-                            hiring_badge_status=connection.hiring_badge_status
+                            hiring_badge_status=connection.hiring_badge_status,
+                            company_override=connection.company if connection.company_locked else None
                         )
 
                         # Backfill name/title/company from the AI's own extraction when the
