@@ -1480,10 +1480,11 @@ export default function Home() {
             </div>
           </nav>
 
-          {/* HERO */}
           <div className="relative overflow-hidden border-b border-white/5">
-            <div className="relative max-w-5xl mx-auto px-6 py-24 sm:py-32 flex flex-col items-center text-center">
-              <div className="relative inline-block">
+            <div className="relative w-full max-w-7xl mx-auto px-6 py-10 sm:py-14 grid lg:grid-cols-2 gap-8 lg:gap-6 items-center">
+              
+              {/* Left Column: Hero Title */}
+              <div className="relative text-left">
                 {(() => {
                   const HERO_LINE1 = "Welcome to";
                   const HERO_PREFIX = "networ";
@@ -1498,7 +1499,7 @@ export default function Home() {
                   const suffixTyped = HERO_SUFFIX.slice(0, Math.max(0, afterLine1 - HERO_PREFIX.length - HERO_KING.length));
 
                   return (
-                    <h1 className="text-5xl sm:text-7xl md:text-8xl font-extrabold tracking-tighter leading-[1.05] min-h-[2.1em] sm:min-h-[2.1em]">
+                    <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tighter leading-[1.1]">
                       <span className="text-[#ebe5d6] font-extrabold tracking-tight">{line1Typed}</span>
                       <br />
                       <span className="text-[#ebe5d6]">{prefixTyped}</span>
@@ -1511,7 +1512,7 @@ export default function Home() {
                           <img
                             src="/icon-192.png"
                             alt="networKING.agent"
-                            className="inline-block w-[1.5em] h-[1.5em] rounded-lg align-baseline"
+                            className="inline-block w-[1.2em] h-[1.2em] rounded-lg align-baseline"
                             style={{ filter: "drop-shadow(0 0 8px rgba(77,133,101,0.85)) drop-shadow(0 0 20px rgba(77,133,101,0.55))" }}
                           />{" "}
                         </span>
@@ -1532,77 +1533,80 @@ export default function Home() {
                 })()}
               </div>
 
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 1, delay: 0.8 }}
-                className="mt-8 flex flex-col items-center gap-6 max-w-2xl mx-auto text-base sm:text-lg text-zinc-400 leading-relaxed font-medium"
-              >
-                <p>
-                  Hi, I&apos;m <span className="text-2xl sm:text-3xl text-[#4d8565] align-middle px-1" style={{ fontFamily: "var(--font-signature)" }}>Rishindra Mateti</span> , the developer and creator of this product.
-                </p>
-                <p>
-                  Real LinkedIn outreach takes real research. You need to know who you&apos;re reaching out to, what they work on, what you have in common, and why you should start a conversation.
-                </p>
-                <p>
-                  I turned that research process into an automation pipeline, so you can spend less time researching and more time deciding who to reach out to and what to actually say.
-                </p>
-                <p className="mt-4 text-sm sm:text-base text-zinc-500">
-                  My first completely independent SaaS product, built around one core idea.
-                </p>
-                <blockquote className="mt-2 mx-auto max-w-xl border-l-2 border-[#4d8565]/50 pl-5 sm:pl-6 text-left">
-                  <p className="text-xl sm:text-2xl font-semibold text-[#ebe5d6] italic leading-snug">
-                    Don&apos;t automate the relationship. Automate the research behind it.
-                  </p>
-                </blockquote>
-              </motion.div>
-              
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 1, delay: 1 }}
-                className="mt-12 flex flex-col items-center w-full max-w-3xl"
-              >
-                <div className="flex flex-col sm:flex-row items-center justify-center w-full gap-8 py-8">
-                  <div className="flex flex-col items-center">
-                    <span className="text-4xl font-extrabold text-[#ebe5d6] tracking-tight">&lt; 15 min</span>
-                    <span className="text-xs uppercase tracking-widest text-zinc-500 font-semibold mt-1">One-time setup</span>
-                  </div>
-                  <div className="hidden sm:block w-px h-12 bg-white/10" />
-                  <div className="flex flex-col items-center">
-                    <span className="text-4xl font-extrabold text-[#ebe5d6] tracking-tight">15<span className="text-[#4d8565]">+</span> min</span>
-                    <span className="text-xs uppercase tracking-widest text-zinc-500 font-semibold mt-1">Saved per profile</span>
-                  </div>
-                </div>
-
-                <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
-                  <Link
-                    href="/login"
-                    onMouseMove={handleMagneticMove}
-                    onMouseLeave={handleMagneticLeave}
-                    className="bg-[#4d8565] hover:bg-[#5a9873] active:scale-[0.97] text-zinc-950 text-sm font-bold px-8 py-3.5 rounded-full transition-all shadow-[0_4px_24px_-6px_rgba(77,133,101,0.6)]"
-                  >
-                    Sign In
-                  </Link>
-                  <Link
-                    href="/login?mode=register"
-                    className="group flex items-center gap-2 border border-white/10 hover:border-[#4d8565]/40 hover:bg-[#4d8565]/5 active:scale-[0.97] text-zinc-200 text-sm font-semibold px-8 py-3.5 rounded-full transition-all"
-                  >
-                    Create free account
-                    <ArrowRight size={14} className="text-zinc-500 group-hover:text-[#4d8565] transition-colors" />
-                  </Link>
-                </div>
-
-                <a
-                  href="https://github.com/rishindra-mateti-tech/networKING.agent"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-8 inline-flex items-center gap-2 text-xs font-semibold text-zinc-600 hover:text-amber-400 transition-colors uppercase tracking-widest"
+              {/* Right Column: Bio, Quote, Stats, CTAs */}
+              <div className="flex flex-col items-start text-left justify-center h-full space-y-6 lg:pl-12">
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 1, delay: 0.8 }}
+                  className="flex flex-col items-start gap-4 text-sm sm:text-base text-zinc-400 leading-relaxed font-medium text-justify"
                 >
-                  <Star size={14} className="mb-0.5" />
-                  Star on GitHub
-                </a>
-              </motion.div>
+                  <p>
+                    Hi, I&apos;m <span className="text-2xl sm:text-3xl text-[#4d8565] align-middle px-1" style={{ fontFamily: "var(--font-signature)" }}>Rishindra Mateti</span>, the developer and creator of this product.
+                  </p>
+                  <p>
+                    Real LinkedIn outreach takes real research. You need to know who you&apos;re reaching out to, what they work on, what you have in common, and why you should start a conversation.
+                  </p>
+                  <p>
+                    I turned that research process into an automation pipeline, so you can spend less time researching and more time deciding who to reach out to and what to actually say.
+                  </p>
+                  <p className="mt-4 text-sm sm:text-base text-zinc-500">
+                    My first completely independent SaaS product, built around one core idea.
+                  </p>
+                  <blockquote className="mt-2 border-l-2 border-[#4d8565]/50 pl-5 sm:pl-6 text-left">
+                    <p className="text-xl sm:text-2xl font-semibold text-[#ebe5d6] italic leading-snug">
+                      Don&apos;t automate the relationship. Automate the research behind it.
+                    </p>
+                  </blockquote>
+                </motion.div>
+                
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 1, delay: 1 }}
+                  className="flex flex-col items-start w-full"
+                >
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-start w-full gap-8 pb-8">
+                    <div className="flex flex-col items-start">
+                      <span className="text-4xl font-extrabold text-[#ebe5d6] tracking-tight">&lt; 15 min</span>
+                      <span className="text-xs uppercase tracking-widest text-zinc-500 font-semibold mt-1">One-time setup</span>
+                    </div>
+                    <div className="hidden sm:block w-px h-12 bg-white/10" />
+                    <div className="flex flex-col items-start">
+                      <span className="text-4xl font-extrabold text-[#ebe5d6] tracking-tight">15+ min</span>
+                      <span className="text-xs uppercase tracking-widest text-zinc-500 font-semibold mt-1">Saved per profile</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 flex flex-wrap items-center justify-start gap-4">
+                    <Link
+                      href="/login"
+                      onMouseMove={handleMagneticMove}
+                      onMouseLeave={handleMagneticLeave}
+                      className="bg-[#4d8565] hover:bg-[#5a9873] active:scale-[0.97] text-zinc-950 text-sm font-bold px-8 py-3.5 rounded-full transition-all shadow-[0_4px_24px_-6px_rgba(77,133,101,0.6)]"
+                    >
+                      Sign In
+                    </Link>
+                    <Link
+                      href="/login?mode=register"
+                      className="group flex items-center gap-2 border border-white/10 hover:border-[#4d8565]/40 hover:bg-[#4d8565]/5 active:scale-[0.97] text-zinc-200 text-sm font-semibold px-8 py-3.5 rounded-full transition-all"
+                    >
+                      Create free account
+                      <ArrowRight size={14} className="text-zinc-500 group-hover:text-[#4d8565] transition-colors" />
+                    </Link>
+                  </div>
+
+                  <a
+                    href="https://github.com/rishindra-mateti-tech/networKING.agent"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-8 inline-flex items-center gap-2 text-xs font-semibold text-zinc-600 hover:text-amber-400 transition-colors uppercase tracking-widest"
+                  >
+                    <Star size={14} className="mb-0.5" />
+                    Star on GitHub
+                  </a>
+                </motion.div>
+              </div>
             </div>
           </div>
 
