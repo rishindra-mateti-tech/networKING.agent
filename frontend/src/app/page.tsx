@@ -52,21 +52,124 @@ function useRevealOnScroll<T extends HTMLElement>() {
   return { ref, visible };
 }
 
-function LandingFeatureCard({ icon: Icon, title, desc, delay }: { icon: typeof Users; title: string; desc: string; delay: number }) {
+// Tracks the cursor position inside a hovered card as CSS custom properties,
+// written directly to the DOM node rather than React state -- this fires on
+// every mousemove, and routing that through setState would re-render the
+// whole card tree every frame for a purely cosmetic effect.
+function handleSpotlightMove(e: React.MouseEvent<HTMLDivElement>) {
+  const rect = e.currentTarget.getBoundingClientRect();
+  e.currentTarget.style.setProperty("--spot-x", `${((e.clientX - rect.left) / rect.width) * 100}%`);
+  e.currentTarget.style.setProperty("--spot-y", `${((e.clientY - rect.top) / rect.height) * 100}%`);
+}
+
+// Pulls an element a few px toward the cursor while hovered, snapping back on
+// leave. Written straight to the DOM (no state) for the same reason as the
+// spotlight tracker above -- this fires every mousemove.
+function handleMagneticMove(e: React.MouseEvent<HTMLElement>) {
+  const rect = e.currentTarget.getBoundingClientRect();
+  const relX = e.clientX - (rect.left + rect.width / 2);
+  const relY = e.clientY - (rect.top + rect.height / 2);
+  const max = 7;
+  const x = Math.max(-max, Math.min(max, relX * 0.25));
+  const y = Math.max(-max, Math.min(max, relY * 0.25));
+  e.currentTarget.style.transform = `translate(${x}px, ${y}px)`;
+}
+function handleMagneticLeave(e: React.MouseEvent<HTMLElement>) {
+  e.currentTarget.style.transform = "translate(0px, 0px)";
+}
+
+// Soft radial highlight that follows the cursor inside a hovered card. Sits
+// behind the card's real content (z-0) and is clipped by the parent's own
+// overflow-hidden + rounded corners, so it never needs its own radius.
+function CardSpotlight() {
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 z-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+      style={{ background: "radial-gradient(circle at var(--spot-x, 50%) var(--spot-y, 50%), rgba(77,133,101,0.14), transparent 42%)" }}
+    />
+  );
+}
+
+function LandingFeatureCard({
+  icon: Icon, index, title, desc, delay, highlighted,
+}: { icon: typeof Users; index: string; title: string; desc: string; delay: number; highlighted?: boolean }) {
   const { ref, visible } = useRevealOnScroll<HTMLDivElement>();
   return (
     <div
       ref={ref}
-      className="bg-white/[0.03] border border-white/10 rounded-xl p-5 hover:border-[#4d8565]/30 hover:bg-white/[0.05] transition-all duration-500"
+      onMouseMove={handleSpotlightMove}
+      className={`group relative overflow-hidden rounded-xl p-5 transition-all duration-500 ${
+        highlighted
+          ? "bg-[#4d8565]/[0.07] border border-[#4d8565]/40 hover:border-[#4d8565]/60"
+          : "bg-white/[0.03] border border-white/10 hover:border-[#4d8565]/30 hover:bg-white/[0.05]"
+      }`}
       style={{
         opacity: visible ? 1 : 0,
         transform: visible ? "translateY(0)" : "translateY(16px)",
         transitionDelay: `${delay}ms`,
       }}
     >
-      <Icon size={20} className="text-[#4d8565] mb-3" />
-      <div className="text-sm font-semibold text-zinc-100">{title}</div>
-      <div className="text-xs text-zinc-500 mt-1.5 leading-relaxed">{desc}</div>
+      <CardSpotlight />
+      <div className="relative z-10">
+        <div className="flex items-center justify-between mb-3">
+          <Icon size={20} className={highlighted ? "text-[#4d8565]" : "text-[#4d8565]/80"} />
+          <span className={`text-xs font-mono ${highlighted ? "text-[#4d8565]/70" : "text-zinc-700"}`}>{index}</span>
+        </div>
+        <div className="text-sm font-semibold text-zinc-100">{title}</div>
+        <div className="text-xs text-zinc-500 mt-1.5 leading-relaxed">{desc}</div>
+      </div>
+    </div>
+  );
+}
+
+// A single node in the "how it works" research pipeline. `terminal` marks the
+// two human-controlled steps at the end (Your Decision / Your Message), which
+// get the accent ring instead of the neutral one -- the visual point being
+// that research is automated but the last steps are not. `active` and `delay`
+// drive a one-time sequential light-up as the section scrolls into view, so
+// the pipeline reads as a real process completing step by step rather than a
+// static diagram.
+function PipelineNode({ icon: Icon, label, terminal, active, delay = 0 }: { icon: typeof Users; label: string; terminal?: boolean; active: boolean; delay?: number }) {
+  return (
+    <div className="flex flex-col items-center gap-2 text-center shrink-0 w-24">
+      <div
+        className={`w-12 h-12 rounded-full border flex items-center justify-center transition-all duration-500 ${
+          !active ? "border-white/5 bg-white/[0.01]" : terminal ? "border-[#4d8565]/60 bg-[#4d8565]/10" : "border-white/15 bg-white/[0.03]"
+        }`}
+        style={{ transitionDelay: `${delay}ms` }}
+      >
+        <Icon size={18} className={`transition-colors duration-500 ${!active ? "text-zinc-800" : terminal ? "text-[#4d8565]" : "text-zinc-400"}`} style={{ transitionDelay: `${delay}ms` }} />
+      </div>
+      <span
+        className={`text-[10px] leading-tight font-medium transition-colors duration-500 ${!active ? "text-zinc-800" : terminal ? "text-[#8fc7a4]" : "text-zinc-500"}`}
+        style={{ transitionDelay: `${delay}ms` }}
+      >
+        {label}
+      </span>
+    </div>
+  );
+}
+
+// Wraps the pipeline row in its own reveal trigger so the nodes light up in
+// sequence (like a checklist completing) the first time the section scrolls
+// into view, instead of sitting there static as a plain diagram.
+function PipelineFlow({ nodes }: { nodes: { icon: typeof Users; label: string; terminal?: boolean }[] }) {
+  const { ref, visible } = useRevealOnScroll<HTMLDivElement>();
+  return (
+    <div ref={ref} className="mt-14 flex flex-col lg:flex-row items-center justify-between gap-4">
+      {nodes.map((node, i) => (
+        <React.Fragment key={node.label}>
+          <PipelineNode icon={node.icon} label={node.label} terminal={node.terminal} active={visible} delay={i * 150} />
+          {i < nodes.length - 1 && (
+            <ChevronRight
+              size={16}
+              className={`shrink-0 rotate-90 lg:rotate-0 transition-colors duration-500 ${visible ? "text-zinc-700" : "text-zinc-900"}`}
+              style={{ transitionDelay: `${i * 150 + 75}ms` }}
+            />
+          )}
+        </React.Fragment>
+      ))}
     </div>
   );
 }
@@ -402,6 +505,14 @@ export default function Home() {
   const [emailCustomInstructions, setEmailCustomInstructions] = useState("");
   const uploadsScreenshotInputRef = useRef<HTMLInputElement>(null);
   const [uploadsScreenshotTargetId, setUploadsScreenshotTargetId] = useState<number | null>(null);
+
+  // Redraft dialog -- lets the user correct which company the LinkedIn DM
+  // drafts are pitched about (for candidates who hold multiple current titles
+  // across companies) and/or give free-text redraft instructions.
+  const [redraftModalConn, setRedraftModalConn] = useState<any | null>(null);
+  const [redraftCompany, setRedraftCompany] = useState("");
+  const [redraftInstructions, setRedraftInstructions] = useState("");
+  const [redraftLoading, setRedraftLoading] = useState(false);
 
   // Fetch helper with Authorization header
   const fetchWithAuth = async (path: string, options: RequestInit = {}) => {
@@ -1163,6 +1274,38 @@ export default function Home() {
     setEmailDraftModalConn(null);
   };
 
+  const openRedraftModal = (conn: any) => {
+    setRedraftCompany(conn.company || "");
+    setRedraftInstructions("");
+    setRedraftModalConn(conn);
+  };
+
+  const confirmRegenerateDrafts = async () => {
+    if (!redraftModalConn) return;
+    setRedraftLoading(true);
+    try {
+      const res = await fetchWithAuth(`/api/connections/${redraftModalConn.id}/regenerate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          company_override: redraftCompany,
+          redraft_instructions: redraftInstructions,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        fetchConnections();
+        setRedraftModalConn(null);
+      } else {
+        showToast(data.detail || "Failed to redraft.", "error");
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setRedraftLoading(false);
+    }
+  };
+
   // Hands the finished draft off to whichever mail client the user prefers, with
   // the recipient, subject and body pre-filled so it opens as a reviewable draft
   // rather than anything being sent automatically.
@@ -1278,13 +1421,40 @@ export default function Home() {
 
   if (!token) {
     // --- MARKETING + AUTHENTICATION LANDING PAGE ---
-    const features: { icon: typeof Search; title: string; desc: string }[] = [
-      { icon: Search, title: "Research and analysis", desc: "Every profile gets analyzed for role, company context, and what's actually worth mentioning, not just a name and a job title." },
-      { icon: BarChart3, title: "One dashboard", desc: "A pipeline board across Pending, Draft Ready, Sent, Replied, and Closed, so you always know who you've actually talked to." },
-      { icon: Bell, title: "Telegram and Slack alerts", desc: "Get notified the moment a draft is ready, right where you already work." },
-      { icon: Pencil, title: "Personalized messages", desc: "Drafts are tuned to who you're messaging. A VP gets a different ask than a recruiter, never a generic template." },
-      { icon: User, title: "Teach it your voice", desc: "Feed it your own writing once, and drafts start sounding like you instead of a template." },
-      { icon: Send, title: "You hit send, not us", desc: "No LinkedIn bot, no bulk blasting. Drafts land in your dashboard for you to edit and paste in yourself." },
+    const workflowSteps: { icon: typeof Search; title: string; desc: string; highlighted?: boolean }[] = [
+      { icon: Search, title: "Research the person", desc: "Go beyond the name and job title. Understand their role, background, interests, and what they're actually working on." },
+      { icon: Globe, title: "Understand the company", desc: "Get the company context that matters: what they do, where the person fits, and what could be relevant to the conversation." },
+      { icon: Link2, title: "Find the connection", desc: "Surface real common ground: shared interests, overlapping experience, projects, or an angle worth opening with." },
+      { icon: Target, title: "Know why you're reaching out", desc: "Turn the research into a clear reason to start the conversation, not just a collection of facts." },
+      { icon: Pencil, title: "Keep your voice", desc: "Teach it how you write once. Drafts use your style and context instead of sounding like another AI template." },
+      { icon: Send, title: "You hit send", desc: "No LinkedIn bot. No bulk blasting. You review the draft, edit it, and decide if and when it's sent.", highlighted: true },
+    ];
+
+    const pipelineNodes: { icon: typeof Search; label: string; terminal?: boolean }[] = [
+      { icon: FileText, label: "LinkedIn Profile" },
+      { icon: Search, label: "Research" },
+      { icon: Users, label: "Person & Company" },
+      { icon: Link2, label: "Connection Points" },
+      { icon: Target, label: "Outreach Context" },
+      { icon: User, label: "Your Decision", terminal: true },
+      { icon: Send, label: "Your Message", terminal: true },
+    ];
+
+    const technicalItems: { icon: typeof Search; title: string; text: string }[] = [
+      { icon: Workflow, title: "Multi-agent research pipeline", text: "Profile research runs through specialized agent stages, built with Python, FastAPI, and Google Gemini." },
+      { icon: Settings, title: "Async worker orchestration", text: "A queue of workers handles concurrency, retries, and automatic Gemini API key failover in the background." },
+      { icon: ShieldCheck, title: "Multi-tenant, secure by default", text: "JWT authentication, per-user data isolation, and API keys encrypted at rest." },
+      { icon: FileText, title: "LinkedIn profile ingestion", text: "Structural PDF parsing with duplicate contact detection, so a re-uploaded profile updates instead of duplicating." },
+      { icon: Code2, title: "Built on a real stack", text: "Next.js, React, and Tailwind on the frontend. FastAPI, SQLAlchemy, and PostgreSQL on the backend." },
+      { icon: Bell, title: "Integrations", text: "Slack and Telegram alerts, plus personalized email drafting for when a LinkedIn DM isn't enough." },
+    ];
+
+    const roadmapItems: string[] = [
+      "Evidence-backed research with sources you can actually verify.",
+      "Relationship scoring to help decide who is worth reaching out to.",
+      "Conversation memory and smarter follow-ups.",
+      "Better company and person signals beyond basic profile information.",
+      "A networking graph connecting people, companies, interests, and relationships.",
     ];
 
     return (
@@ -1313,7 +1483,7 @@ export default function Home() {
             className="pointer-events-none absolute inset-0"
             style={{ background: "radial-gradient(ellipse 900px 500px at 50% 0%, rgba(77,133,101,0.1), transparent 70%)" }}
           />
-          <div className="relative max-w-3xl mx-auto px-6 py-20 sm:py-28 text-center">
+          <div className="relative max-w-3xl mx-auto px-6 py-16 sm:py-24 text-center">
               <h1 className="text-4xl sm:text-6xl font-extrabold tracking-tight text-[#ebe5d6] leading-[1.1] min-h-[2.2em] sm:min-h-[2.4em]">
                 {(() => {
                   const HERO_LINE1 = "Welcome to";
@@ -1328,17 +1498,9 @@ export default function Home() {
                   const kingTyped = HERO_KING.slice(0, Math.max(0, afterLine1 - HERO_PREFIX.length));
                   const suffixTyped = HERO_SUFFIX.slice(0, Math.max(0, afterLine1 - HERO_PREFIX.length - HERO_KING.length));
 
-                  const cursor = (
-                    <span
-                      className="inline-block w-[3px] sm:w-1 h-[0.85em] bg-[#4d8565] ml-1 align-middle animate-pulse"
-                      aria-hidden="true"
-                    />
-                  );
-
                   return (
                     <>
                       {line1Typed}
-                      {!heroDone && line1Typed.length < HERO_LINE1.length && cursor}
                       <br />
                       {prefixTyped}
                       {heroDone && heroShowCrown ? (
@@ -1351,7 +1513,7 @@ export default function Home() {
                             src="/icon-192.png"
                             alt="networKING.agent"
                             className="inline-block w-[1.5em] h-[1.5em] rounded-lg align-baseline"
-                            style={{ filter: "drop-shadow(0 0 8px rgba(77,133,101,0.95)) drop-shadow(0 0 20px rgba(77,133,101,0.65))" }}
+                            style={{ filter: "drop-shadow(0 0 8px rgba(77,133,101,0.85)) drop-shadow(0 0 20px rgba(77,133,101,0.55))" }}
                           />{" "}
                         </span>
                       ) : (
@@ -1359,14 +1521,13 @@ export default function Home() {
                           className="text-[#4d8565] transition-opacity duration-200"
                           style={{
                             opacity: heroDone && heroBlinking ? 0 : 1,
-                            textShadow: heroDone ? "0 0 10px rgba(77,133,101,0.9), 0 0 22px rgba(77,133,101,0.55)" : undefined,
+                            textShadow: heroDone ? "0 0 6px rgba(77,133,101,0.5)" : undefined,
                           }}
                         >
                           {kingTyped}
                         </span>
                       )}
                       {suffixTyped}
-                      {heroTyped >= HERO_LINE1.length && cursor}
                     </>
                   );
                 })()}
@@ -1379,24 +1540,52 @@ export default function Home() {
                 >
                   Rishindra Mateti ,
                 </span>{" "}
-                the developer and creator of this project.
-                Real LinkedIn outreach takes real research per person, and I wanted
-                that research done well, so my own time goes into judgment: who to
-                reach out to, what to actually say, and whether to hit send.
-                So I turned my own research process into an automation pipeline,
-                and that became this project. Use it yourself by signing up below.
+                the developer and creator of this product.
               </p>
+              <p className="mt-4 text-base sm:text-lg text-zinc-400 leading-relaxed">
+                Real LinkedIn outreach takes real research. You need to know who
+                you're reaching out to, what they work on, what you have in
+                common, and why you should start a conversation.
+              </p>
+              <p className="mt-4 text-base sm:text-lg text-zinc-400 leading-relaxed">
+                I turned that research process into an automation pipeline, so
+                you can spend less time researching and more time deciding who
+                to reach out to and what to actually say.
+              </p>
+
+              <p className="mt-8 text-sm sm:text-base text-zinc-500">
+                My first completely independent SaaS product, built around one core idea.
+              </p>
+              <blockquote className="mt-4 mx-auto max-w-xl border-l-2 border-[#4d8565]/50 pl-5 sm:pl-6 text-left">
+                <p className="text-xl sm:text-2xl font-semibold text-[#ebe5d6] italic leading-snug">
+                  Don't automate the relationship. Automate the research behind it.
+                </p>
+              </blockquote>
+
+              <div className="mt-14 flex flex-col items-center">
+                <p className="text-base sm:text-lg font-bold uppercase tracking-wide text-zinc-300">
+                  Set up once · under 15 minutes
+                </p>
+                <p className="mt-2 text-5xl sm:text-6xl md:text-7xl font-extrabold uppercase tracking-tight text-[#4d8565] leading-none" style={{ textShadow: "0 0 30px rgba(77,133,101,0.25)" }}>
+                  Save 15+ minutes
+                </p>
+                <p className="mt-3 text-sm sm:text-base italic text-zinc-500">
+                  of research per profile
+                </p>
+              </div>
 
               <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
                 <Link
                   href="/login"
-                  className="bg-[#4d8565] hover:bg-[#5a9873] text-zinc-950 text-sm font-bold px-6 py-3 rounded-lg transition-colors"
+                  onMouseMove={handleMagneticMove}
+                  onMouseLeave={handleMagneticLeave}
+                  className="bg-[#4d8565] hover:bg-[#5a9873] active:scale-[0.98] text-zinc-950 text-sm font-bold px-7 py-3.5 rounded-lg transition-all shadow-[0_8px_24px_-8px_rgba(77,133,101,0.5)]"
                 >
                   Sign In
                 </Link>
                 <Link
                   href="/login?mode=register"
-                  className="border border-white/15 hover:border-white/30 text-zinc-200 text-sm font-semibold px-6 py-3 rounded-lg transition-colors"
+                  className="border border-white/15 hover:border-white/30 active:scale-[0.98] text-zinc-200 text-sm font-semibold px-7 py-3.5 rounded-lg transition-all"
                 >
                   Create a free account
                 </Link>
@@ -1414,23 +1603,95 @@ export default function Home() {
           </div>
         </div>
 
-        {/* FEATURES */}
-        <div className="max-w-6xl mx-auto px-6 py-20 sm:py-28">
-          <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[#ebe5d6] text-center">
-            What it actually does
-          </h2>
-          <div className="mt-12 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {features.map((f, i) => (
-              <LandingFeatureCard key={f.title} icon={f.icon} title={f.title} desc={f.desc} delay={i * 80} />
-            ))}
+        {/* WORKFLOW: what happens before you hit send */}
+        <div>
+          <div className="max-w-6xl mx-auto px-6 py-16 sm:py-20">
+            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-[#ebe5d6] text-center">
+              What happens before you hit send.
+            </h2>
+            <div className="mt-12 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {workflowSteps.map((f, i) => (
+                <LandingFeatureCard
+                  key={f.title}
+                  icon={f.icon}
+                  index={`0${i + 1}`}
+                  title={f.title}
+                  desc={f.desc}
+                  delay={i * 80}
+                  highlighted={f.highlighted}
+                />
+              ))}
+            </div>
+            <p className="mt-12 text-center text-2xl sm:text-3xl font-extrabold tracking-tight text-[#8fc7a4]">
+              AI researches. You decide.
+            </p>
           </div>
         </div>
 
-        {/* TRUST LINE */}
-        <div className="border-t border-white/10">
-          <div className="max-w-6xl mx-auto px-6 py-8 flex items-center justify-center gap-2 text-[11px] text-zinc-500 text-center">
-            <ShieldCheck size={14} className="text-[#4d8565] shrink-0" />
-            <span>No LinkedIn bot or bulk messaging. API keys encrypted at rest. BYOK, bring your own key.</span>
+        {/* PIPELINE: how the research actually flows */}
+        <div>
+          <div className="max-w-5xl mx-auto px-6 py-16 sm:py-20">
+            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-[#ebe5d6] text-center">
+              How networKING.agent works.
+            </h2>
+            <p className="mt-3 text-sm text-zinc-500 text-center max-w-xl mx-auto">
+              Every profile moves through the same research pipeline before a draft ever reaches your dashboard.
+            </p>
+            <PipelineFlow nodes={pipelineNodes} />
+          </div>
+        </div>
+
+        {/* TECHNICAL: how it's built */}
+        <div>
+          <div className="max-w-6xl mx-auto px-6 py-16 sm:py-20">
+            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-[#ebe5d6] text-center">
+              A little more under the hood.
+            </h2>
+            <div className="mt-14 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {technicalItems.map(item => (
+                <div
+                  key={item.title}
+                  onMouseMove={handleSpotlightMove}
+                  className="group relative overflow-hidden bg-white/[0.03] border border-white/10 rounded-xl p-5"
+                >
+                  <CardSpotlight />
+                  <div className="relative z-10">
+                    <item.icon size={20} className="text-[#4d8565] mb-3" />
+                    <p className="text-sm font-semibold text-zinc-100">{item.title}</p>
+                    <p className="text-xs text-zinc-500 mt-1.5 leading-relaxed">{item.text}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* ROADMAP */}
+        <div>
+          <div className="max-w-3xl mx-auto px-6 py-16 sm:py-20">
+            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-[#ebe5d6] text-center">
+              What's next.
+            </h2>
+            <p className="mt-3 text-sm text-zinc-500 text-center">This is v1.</p>
+            <ul className="mt-10 space-y-4">
+              {roadmapItems.map(item => (
+                <li key={item} className="flex items-start gap-3 text-sm text-zinc-400 leading-relaxed">
+                  <ChevronRight size={14} className="text-[#4d8565] shrink-0 mt-0.5" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        {/* CLOSING STATEMENT */}
+        <div>
+          <div className="max-w-3xl mx-auto px-6 py-16 sm:py-20 text-center">
+            <p className="text-xl sm:text-2xl font-semibold text-[#ebe5d6] leading-snug">
+              The goal isn't to automate networking.
+              <br />
+              It's to remove the most time-consuming part of it.
+            </p>
           </div>
         </div>
       </div>
@@ -4324,7 +4585,14 @@ export default function Home() {
                       {copiedText ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
                       <span>{copiedText ? "Copied!" : "Copy Draft"}</span>
                     </button>
-                    <button 
+                    <button
+                      onClick={() => openRedraftModal(selectedConnection)}
+                      className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white px-3 py-1.5 border border-zinc-700 rounded text-[10px] font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer"
+                    >
+                      <RefreshCw size={12} />
+                      <span>Redraft</span>
+                    </button>
+                    <button
                       onClick={() => handleUpdateStatus(selectedConnection.id, "sent")}
                       className="bg-zinc-900 border border-emerald-800/40 text-emerald-400 hover:bg-emerald-950/20 hover:text-emerald-400 hover:border-emerald-700 px-3 py-1.5 rounded text-[10px] font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer"
                     >
@@ -4675,6 +4943,66 @@ export default function Home() {
                 className="bg-emerald-950/30 border border-emerald-800/50 hover:bg-emerald-900/40 hover:border-emerald-600 text-xs font-semibold text-emerald-400 hover:text-emerald-300 px-4 py-2 rounded-lg cursor-pointer transition-colors"
               >
                 Generate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {redraftModalConn && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+          <div className="bg-zinc-950/95 backdrop-blur-xl border border-white/10 rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl p-6 space-y-5">
+            <div>
+              <h3 className="text-base font-bold text-white">Redraft for {redraftModalConn.name}</h3>
+              <p className="text-xs text-zinc-500 mt-1">
+                Correct the company if this person holds multiple titles across companies, and/or tell it how to change the drafts.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-[10px] text-zinc-500 font-semibold uppercase tracking-wider mb-1">
+                Company (used in all 5 drafts)
+              </label>
+              <input
+                type="text"
+                value={redraftCompany}
+                onChange={e => setRedraftCompany(e.target.value)}
+                placeholder="e.g. Snaphomz"
+                className="w-full bg-black border border-white/10 rounded-lg px-3 py-2.5 text-xs text-zinc-200 focus:outline-none focus:border-[#4d8565]/50 focus:ring-1 focus:ring-[#4d8565]/30 transition-colors"
+              />
+              <p className="text-[10px] text-zinc-500">
+                Once set here, this company sticks for this candidate even if you re-upload their profile later.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-[10px] text-zinc-500 font-semibold uppercase tracking-wider mb-1">
+                Tell the model how you want it redrafted (optional)
+              </label>
+              <textarea
+                value={redraftInstructions}
+                onChange={e => setRedraftInstructions(e.target.value)}
+                rows={4}
+                placeholder="e.g. make the Featured draft shorter, lead with the technical angle instead of referral, mention I'm relocating to the Bay Area"
+                className="w-full bg-black border border-white/10 rounded-lg px-3 py-2.5 text-xs text-zinc-200 focus:outline-none focus:border-[#4d8565]/50 focus:ring-1 focus:ring-[#4d8565]/30 transition-colors resize-none"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                onClick={() => setRedraftModalConn(null)}
+                disabled={redraftLoading}
+                className="px-4 py-2 rounded-lg text-xs font-semibold text-zinc-400 hover:text-white cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmRegenerateDrafts}
+                disabled={redraftLoading}
+                className="bg-emerald-950/30 border border-emerald-800/50 hover:bg-emerald-900/40 hover:border-emerald-600 text-xs font-semibold text-emerald-400 hover:text-emerald-300 px-4 py-2 rounded-lg cursor-pointer transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {redraftLoading && <Loader2 size={12} className="animate-spin" />}
+                <span>{redraftLoading ? "Redrafting..." : "Redraft"}</span>
               </button>
             </div>
           </div>

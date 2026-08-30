@@ -12,9 +12,15 @@
 
 # networKING.agent
 
-**A multi-agent AI system that researches a person before you message them,
-so the message is specific instead of "loved your profile!". You still read,
-edit, and personally send every single one.**
+**Don't automate the relationship. Automate the research behind it.**
+
+networKING.agent is a multi-agent research pipeline, not a message
+generator. Give it a LinkedIn profile and it researches the person, their
+company, and where the two of you actually overlap, then turns that
+research into a few personalized outreach options. AI researches, you
+decide: you still read, edit, and personally send every single one. Set it
+up once in under 15 minutes and it saves 15+ minutes of research on every
+profile after that.
 
 **[Live demo](https://networking-s-agent.vercel.app)** — needs your
 own free Gemini API key to actually run anything (get one from
@@ -166,5 +172,6 @@ appreciated but not required.
 
 ***
 
-*This is a personal side project, not a product. Feedback and PRs welcome,
-but expect it to keep evolving as I use it.*
+*This is my first completely independent SaaS product, built and shipped
+end to end on my own, and it's still v1. Feedback and PRs welcome, expect
+it to keep evolving as I use it myself.*
