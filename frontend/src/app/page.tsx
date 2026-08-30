@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
+import { motion } from "motion/react";
 import {
   Users, User, Key, Settings, LogOut, Search, Plus, Star, Trash2,
   Send, RefreshCw, Check, Copy, Clipboard, FileText, ArrowRight, MessageSquare, AlertCircle,
@@ -94,79 +95,76 @@ function CardSpotlight() {
 function LandingFeatureCard({
   icon: Icon, index, title, desc, delay, highlighted,
 }: { icon: typeof Users; index: string; title: string; desc: string; delay: number; highlighted?: boolean }) {
-  const { ref, visible } = useRevealOnScroll<HTMLDivElement>();
   return (
-    <div
-      ref={ref}
+    <motion.div
+      initial={{ opacity: 0, y: 24 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, amount: 0.15 }}
+      transition={{ duration: 0.6, delay: delay / 1000, ease: [0.16, 1, 0.3, 1] }}
       onMouseMove={handleSpotlightMove}
-      className={`group relative overflow-hidden rounded-xl p-5 transition-all duration-500 ${
+      className={`group relative overflow-hidden rounded-2xl p-6 transition-colors duration-500 flex flex-col h-full ${
         highlighted
-          ? "bg-[#4d8565]/[0.07] border border-[#4d8565]/40 hover:border-[#4d8565]/60"
-          : "bg-white/[0.03] border border-white/10 hover:border-[#4d8565]/30 hover:bg-white/[0.05]"
+          ? "bg-[#4d8565]/[0.08] border border-[#4d8565]/30 hover:border-[#4d8565]/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
+          : "bg-white/[0.02] border border-white/[0.08] hover:border-white/20 hover:bg-white/[0.04] shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]"
       }`}
-      style={{
-        opacity: visible ? 1 : 0,
-        transform: visible ? "translateY(0)" : "translateY(16px)",
-        transitionDelay: `${delay}ms`,
-      }}
     >
       <CardSpotlight />
-      <div className="relative z-10">
-        <div className="flex items-center justify-between mb-3">
-          <Icon size={20} className={highlighted ? "text-[#4d8565]" : "text-[#4d8565]/80"} />
-          <span className={`text-xs font-mono ${highlighted ? "text-[#4d8565]/70" : "text-zinc-700"}`}>{index}</span>
+      <div className="relative z-10 flex flex-col flex-1">
+        <div className="flex items-center justify-between mb-10">
+          <Icon size={22} className={highlighted ? "text-[#4d8565]" : "text-zinc-500 group-hover:text-zinc-300 transition-colors"} strokeWidth={1.5} />
+          <span className={`text-[10px] font-mono tracking-widest ${highlighted ? "text-[#4d8565]/70" : "text-zinc-700"}`}>{index}</span>
         </div>
-        <div className="text-sm font-semibold text-zinc-100">{title}</div>
-        <div className="text-xs text-zinc-500 mt-1.5 leading-relaxed">{desc}</div>
+        <div className="mt-auto">
+          <h3 className="text-base font-semibold text-zinc-100 tracking-tight">{title}</h3>
+          <p className="text-sm text-zinc-400 mt-2.5 leading-relaxed max-w-[24ch]">{desc}</p>
+        </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
-// A single node in the "how it works" research pipeline. `terminal` marks the
-// two human-controlled steps at the end (Your Decision / Your Message), which
-// get the accent ring instead of the neutral one -- the visual point being
-// that research is automated but the last steps are not. `active` and `delay`
-// drive a one-time sequential light-up as the section scrolls into view, so
-// the pipeline reads as a real process completing step by step rather than a
-// static diagram.
-function PipelineNode({ icon: Icon, label, terminal, active, delay = 0 }: { icon: typeof Users; label: string; terminal?: boolean; active: boolean; delay?: number }) {
+function PipelineNode({ icon: Icon, label, terminal, delay = 0 }: { icon: typeof Users; label: string; terminal?: boolean; delay?: number }) {
   return (
-    <div className="flex flex-col items-center gap-2 text-center shrink-0 w-24">
+    <motion.div 
+      className="flex flex-col items-center gap-3 text-center shrink-0 w-28"
+      initial={{ opacity: 0, scale: 0.9 }}
+      whileInView={{ opacity: 1, scale: 1 }}
+      viewport={{ once: true, amount: 0.8 }}
+      transition={{ duration: 0.5, delay: delay / 1000, ease: [0.16, 1, 0.3, 1] }}
+    >
       <div
-        className={`w-12 h-12 rounded-full border flex items-center justify-center transition-all duration-500 ${
-          !active ? "border-white/5 bg-white/[0.01]" : terminal ? "border-[#4d8565]/60 bg-[#4d8565]/10" : "border-white/15 bg-white/[0.03]"
+        className={`w-14 h-14 rounded-full border flex items-center justify-center transition-colors duration-500 ${
+          terminal ? "border-[#4d8565]/40 bg-[#4d8565]/10 shadow-[0_0_20px_rgba(77,133,101,0.15)]" : "border-white/10 bg-white/[0.02]"
         }`}
-        style={{ transitionDelay: `${delay}ms` }}
       >
-        <Icon size={18} className={`transition-colors duration-500 ${!active ? "text-zinc-800" : terminal ? "text-[#4d8565]" : "text-zinc-400"}`} style={{ transitionDelay: `${delay}ms` }} />
+        <Icon size={20} className={terminal ? "text-[#4d8565]" : "text-zinc-500"} strokeWidth={1.5} />
       </div>
-      <span
-        className={`text-[10px] leading-tight font-medium transition-colors duration-500 ${!active ? "text-zinc-800" : terminal ? "text-[#8fc7a4]" : "text-zinc-500"}`}
-        style={{ transitionDelay: `${delay}ms` }}
-      >
+      <span className={`text-[11px] font-medium tracking-tight ${terminal ? "text-[#8fc7a4]" : "text-zinc-400"}`}>
         {label}
       </span>
-    </div>
+    </motion.div>
   );
 }
 
-// Wraps the pipeline row in its own reveal trigger so the nodes light up in
-// sequence (like a checklist completing) the first time the section scrolls
-// into view, instead of sitting there static as a plain diagram.
 function PipelineFlow({ nodes }: { nodes: { icon: typeof Users; label: string; terminal?: boolean }[] }) {
-  const { ref, visible } = useRevealOnScroll<HTMLDivElement>();
   return (
-    <div ref={ref} className="mt-14 flex flex-col lg:flex-row items-center justify-between gap-4">
+    <div className="mt-16 flex flex-col lg:flex-row items-center justify-between gap-4 lg:gap-2">
       {nodes.map((node, i) => (
         <React.Fragment key={node.label}>
-          <PipelineNode icon={node.icon} label={node.label} terminal={node.terminal} active={visible} delay={i * 150} />
+          <PipelineNode icon={node.icon} label={node.label} terminal={node.terminal} delay={i * 120} />
           {i < nodes.length - 1 && (
-            <ChevronRight
-              size={16}
-              className={`shrink-0 rotate-90 lg:rotate-0 transition-colors duration-500 ${visible ? "text-zinc-700" : "text-zinc-900"}`}
-              style={{ transitionDelay: `${i * 150 + 75}ms` }}
-            />
+            <motion.div
+              initial={{ opacity: 0, x: -10 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ once: true, amount: 0.8 }}
+              transition={{ duration: 0.4, delay: (i * 120 + 60) / 1000 }}
+            >
+              <ChevronRight
+                size={16}
+                className="shrink-0 rotate-90 lg:rotate-0 text-zinc-700"
+                strokeWidth={1.5}
+              />
+            </motion.div>
           )}
         </React.Fragment>
       ))}
@@ -1458,33 +1456,34 @@ export default function Home() {
     ];
 
     return (
-      <div className="min-h-screen bg-zinc-950 text-zinc-200">
-        {/* NAV */}
-        <nav className="sticky top-0 z-20 border-b border-white/10 bg-zinc-950/80 backdrop-blur-md">
-          <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <img src="/icon-192.png" alt="networKING.agent" className="w-7 h-7 rounded-md" />
-              <span className="text-sm font-extrabold tracking-tight text-[#ebe5d6]">
-                networ<span className="text-[#4d8565]">KING</span>.agent
-              </span>
+      <div 
+        className="min-h-screen bg-[#09090b] text-zinc-200 selection:bg-[#4d8565]/30 relative overflow-hidden"
+      >
+        <div className="relative z-10 w-full">
+          {/* NAV */}
+          <nav className="sticky top-0 z-50 border-b border-white/[0.08] bg-[#09090b]/80 backdrop-blur-xl">
+            <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="relative flex items-center justify-center w-8 h-8 rounded-lg overflow-hidden">
+                  <img src="/icon-192.png" alt="networKING.agent" className="w-full h-full object-cover opacity-90" />
+                </div>
+                <span className="text-sm font-extrabold tracking-tight text-[#ebe5d6]">
+                  networ<span className="text-[#4d8565]">KING</span><span className="text-[#ebe5d6]">.agent</span>
+                </span>
+              </div>
+              <Link
+                href="/login"
+                className="bg-[#4d8565] hover:bg-[#5a9873] text-[#09090b] text-xs font-bold px-5 py-2.5 rounded-full transition-all shadow-[0_4px_14px_rgba(77,133,101,0.4)] hover:shadow-[0_6px_20px_rgba(77,133,101,0.6)] hover:-translate-y-0.5 active:translate-y-0"
+              >
+                Sign In
+              </Link>
             </div>
-            <Link
-              href="/login"
-              className="bg-[#4d8565] hover:bg-[#5a9873] text-zinc-950 text-xs font-bold px-4 py-2 rounded-full transition-colors"
-            >
-              Sign In
-            </Link>
-          </div>
-        </nav>
+          </nav>
 
-        {/* HERO */}
-        <div className="relative overflow-hidden border-b border-white/10">
-          <div
-            className="pointer-events-none absolute inset-0"
-            style={{ background: "radial-gradient(ellipse 900px 500px at 50% 0%, rgba(77,133,101,0.1), transparent 70%)" }}
-          />
-          <div className="relative max-w-3xl mx-auto px-6 py-16 sm:py-24 text-center">
-              <h1 className="text-4xl sm:text-6xl font-extrabold tracking-tight text-[#ebe5d6] leading-[1.1] min-h-[2.2em] sm:min-h-[2.4em]">
+          {/* HERO */}
+          <div className="relative overflow-hidden border-b border-white/5">
+            <div className="relative max-w-5xl mx-auto px-6 py-24 sm:py-32 flex flex-col items-center text-center">
+              <div className="relative inline-block">
                 {(() => {
                   const HERO_LINE1 = "Welcome to";
                   const HERO_PREFIX = "networ";
@@ -1499,10 +1498,10 @@ export default function Home() {
                   const suffixTyped = HERO_SUFFIX.slice(0, Math.max(0, afterLine1 - HERO_PREFIX.length - HERO_KING.length));
 
                   return (
-                    <>
-                      {line1Typed}
+                    <h1 className="text-5xl sm:text-7xl md:text-8xl font-extrabold tracking-tighter leading-[1.05] min-h-[2.1em] sm:min-h-[2.1em]">
+                      <span className="text-[#ebe5d6] font-extrabold tracking-tight">{line1Typed}</span>
                       <br />
-                      {prefixTyped}
+                      <span className="text-[#ebe5d6]">{prefixTyped}</span>
                       {heroDone && heroShowCrown ? (
                         <span
                           className="inline-flex items-center transition-opacity duration-200"
@@ -1527,171 +1526,236 @@ export default function Home() {
                           {kingTyped}
                         </span>
                       )}
-                      {suffixTyped}
-                    </>
+                      <span className="text-[#ebe5d6]">{suffixTyped}</span>
+                    </h1>
                   );
                 })()}
-              </h1>
-              <p className="mt-6 text-base sm:text-lg text-zinc-400 leading-relaxed">
-                Hi, I'm{" "}
-                <span
-                  className="text-2xl sm:text-3xl text-[#4d8565] align-middle"
-                  style={{ fontFamily: "var(--font-signature)" }}
-                >
-                  Rishindra Mateti ,
-                </span>{" "}
-                the developer and creator of this product.
-              </p>
-              <p className="mt-4 text-base sm:text-lg text-zinc-400 leading-relaxed">
-                Real LinkedIn outreach takes real research. You need to know who
-                you're reaching out to, what they work on, what you have in
-                common, and why you should start a conversation.
-              </p>
-              <p className="mt-4 text-base sm:text-lg text-zinc-400 leading-relaxed">
-                I turned that research process into an automation pipeline, so
-                you can spend less time researching and more time deciding who
-                to reach out to and what to actually say.
-              </p>
-
-              <p className="mt-8 text-sm sm:text-base text-zinc-500">
-                My first completely independent SaaS product, built around one core idea.
-              </p>
-              <blockquote className="mt-4 mx-auto max-w-xl border-l-2 border-[#4d8565]/50 pl-5 sm:pl-6 text-left">
-                <p className="text-xl sm:text-2xl font-semibold text-[#ebe5d6] italic leading-snug">
-                  Don't automate the relationship. Automate the research behind it.
-                </p>
-              </blockquote>
-
-              <div className="mt-14 flex flex-col items-center">
-                <p className="text-base sm:text-lg font-bold uppercase tracking-wide text-zinc-300">
-                  Set up once · under 15 minutes
-                </p>
-                <p className="mt-2 text-5xl sm:text-6xl md:text-7xl font-extrabold uppercase tracking-tight text-[#4d8565] leading-none" style={{ textShadow: "0 0 30px rgba(77,133,101,0.25)" }}>
-                  Save 15+ minutes
-                </p>
-                <p className="mt-3 text-sm sm:text-base italic text-zinc-500">
-                  of research per profile
-                </p>
               </div>
 
-              <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-                <Link
-                  href="/login"
-                  onMouseMove={handleMagneticMove}
-                  onMouseLeave={handleMagneticLeave}
-                  className="bg-[#4d8565] hover:bg-[#5a9873] active:scale-[0.98] text-zinc-950 text-sm font-bold px-7 py-3.5 rounded-lg transition-all shadow-[0_8px_24px_-8px_rgba(77,133,101,0.5)]"
-                >
-                  Sign In
-                </Link>
-                <Link
-                  href="/login?mode=register"
-                  className="border border-white/15 hover:border-white/30 active:scale-[0.98] text-zinc-200 text-sm font-semibold px-7 py-3.5 rounded-lg transition-all"
-                >
-                  Create a free account
-                </Link>
-              </div>
-
-              <a
-                href="https://github.com/rishindra-mateti-tech/networKING.agent"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-5 inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-amber-400 transition-colors"
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 1, delay: 0.8 }}
+                className="mt-8 flex flex-col items-center gap-6 max-w-2xl mx-auto text-base sm:text-lg text-zinc-400 leading-relaxed font-medium"
               >
-                <Star size={13} />
-                Star my work on GitHub
-              </a>
-          </div>
-        </div>
-
-        {/* WORKFLOW: what happens before you hit send */}
-        <div>
-          <div className="max-w-6xl mx-auto px-6 py-16 sm:py-20">
-            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-[#ebe5d6] text-center">
-              What happens before you hit send.
-            </h2>
-            <div className="mt-12 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {workflowSteps.map((f, i) => (
-                <LandingFeatureCard
-                  key={f.title}
-                  icon={f.icon}
-                  index={`0${i + 1}`}
-                  title={f.title}
-                  desc={f.desc}
-                  delay={i * 80}
-                  highlighted={f.highlighted}
-                />
-              ))}
-            </div>
-            <p className="mt-12 text-center text-2xl sm:text-3xl font-extrabold tracking-tight text-[#8fc7a4]">
-              AI researches. You decide.
-            </p>
-          </div>
-        </div>
-
-        {/* PIPELINE: how the research actually flows */}
-        <div>
-          <div className="max-w-5xl mx-auto px-6 py-16 sm:py-20">
-            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-[#ebe5d6] text-center">
-              How networKING.agent works.
-            </h2>
-            <p className="mt-3 text-sm text-zinc-500 text-center max-w-xl mx-auto">
-              Every profile moves through the same research pipeline before a draft ever reaches your dashboard.
-            </p>
-            <PipelineFlow nodes={pipelineNodes} />
-          </div>
-        </div>
-
-        {/* TECHNICAL: how it's built */}
-        <div>
-          <div className="max-w-6xl mx-auto px-6 py-16 sm:py-20">
-            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-[#ebe5d6] text-center">
-              A little more under the hood.
-            </h2>
-            <div className="mt-14 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {technicalItems.map(item => (
-                <div
-                  key={item.title}
-                  onMouseMove={handleSpotlightMove}
-                  className="group relative overflow-hidden bg-white/[0.03] border border-white/10 rounded-xl p-5"
-                >
-                  <CardSpotlight />
-                  <div className="relative z-10">
-                    <item.icon size={20} className="text-[#4d8565] mb-3" />
-                    <p className="text-sm font-semibold text-zinc-100">{item.title}</p>
-                    <p className="text-xs text-zinc-500 mt-1.5 leading-relaxed">{item.text}</p>
+                <p>
+                  Hi, I&apos;m <span className="text-2xl sm:text-3xl text-[#4d8565] align-middle px-1" style={{ fontFamily: "var(--font-signature)" }}>Rishindra Mateti</span> , the developer and creator of this product.
+                </p>
+                <p>
+                  Real LinkedIn outreach takes real research. You need to know who you&apos;re reaching out to, what they work on, what you have in common, and why you should start a conversation.
+                </p>
+                <p>
+                  I turned that research process into an automation pipeline, so you can spend less time researching and more time deciding who to reach out to and what to actually say.
+                </p>
+                <p className="mt-4 text-sm sm:text-base text-zinc-500">
+                  My first completely independent SaaS product, built around one core idea.
+                </p>
+                <blockquote className="mt-2 mx-auto max-w-xl border-l-2 border-[#4d8565]/50 pl-5 sm:pl-6 text-left">
+                  <p className="text-xl sm:text-2xl font-semibold text-[#ebe5d6] italic leading-snug">
+                    Don&apos;t automate the relationship. Automate the research behind it.
+                  </p>
+                </blockquote>
+              </motion.div>
+              
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 1, delay: 1 }}
+                className="mt-12 flex flex-col items-center w-full max-w-3xl"
+              >
+                <div className="flex flex-col sm:flex-row items-center justify-center w-full gap-8 py-8">
+                  <div className="flex flex-col items-center">
+                    <span className="text-4xl font-extrabold text-[#ebe5d6] tracking-tight">&lt; 15 min</span>
+                    <span className="text-xs uppercase tracking-widest text-zinc-500 font-semibold mt-1">One-time setup</span>
+                  </div>
+                  <div className="hidden sm:block w-px h-12 bg-white/10" />
+                  <div className="flex flex-col items-center">
+                    <span className="text-4xl font-extrabold text-[#ebe5d6] tracking-tight">15<span className="text-[#4d8565]">+</span> min</span>
+                    <span className="text-xs uppercase tracking-widest text-zinc-500 font-semibold mt-1">Saved per profile</span>
                   </div>
                 </div>
-              ))}
+
+                <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
+                  <Link
+                    href="/login"
+                    onMouseMove={handleMagneticMove}
+                    onMouseLeave={handleMagneticLeave}
+                    className="bg-[#4d8565] hover:bg-[#5a9873] active:scale-[0.97] text-zinc-950 text-sm font-bold px-8 py-3.5 rounded-full transition-all shadow-[0_4px_24px_-6px_rgba(77,133,101,0.6)]"
+                  >
+                    Sign In
+                  </Link>
+                  <Link
+                    href="/login?mode=register"
+                    className="group flex items-center gap-2 border border-white/10 hover:border-[#4d8565]/40 hover:bg-[#4d8565]/5 active:scale-[0.97] text-zinc-200 text-sm font-semibold px-8 py-3.5 rounded-full transition-all"
+                  >
+                    Create free account
+                    <ArrowRight size={14} className="text-zinc-500 group-hover:text-[#4d8565] transition-colors" />
+                  </Link>
+                </div>
+
+                <a
+                  href="https://github.com/rishindra-mateti-tech/networKING.agent"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-8 inline-flex items-center gap-2 text-xs font-semibold text-zinc-600 hover:text-amber-400 transition-colors uppercase tracking-widest"
+                >
+                  <Star size={14} className="mb-0.5" />
+                  Star on GitHub
+                </a>
+              </motion.div>
             </div>
           </div>
-        </div>
 
-        {/* ROADMAP */}
-        <div>
-          <div className="max-w-3xl mx-auto px-6 py-16 sm:py-20">
-            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-[#ebe5d6] text-center">
-              What's next.
-            </h2>
-            <p className="mt-3 text-sm text-zinc-500 text-center">This is v1.</p>
-            <ul className="mt-10 space-y-4">
-              {roadmapItems.map(item => (
-                <li key={item} className="flex items-start gap-3 text-sm text-zinc-400 leading-relaxed">
-                  <ChevronRight size={14} className="text-[#4d8565] shrink-0 mt-0.5" />
-                  <span>{item}</span>
-                </li>
-              ))}
-            </ul>
+          {/* WORKFLOW */}
+          <div className="relative border-b border-white/5">
+            <div className="max-w-6xl mx-auto px-6 py-24 sm:py-32">
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, amount: 0.8 }}
+                className="flex flex-col items-center text-center max-w-2xl mx-auto"
+              >
+                <h2 className="text-3xl sm:text-5xl font-bold tracking-tighter text-[#ebe5d6]">
+                  What happens before you hit send.
+                </h2>
+                <p className="mt-4 text-base text-zinc-500 leading-relaxed font-medium">
+                  We don't automate the relationship. We automate the research behind it. Here&apos;s exactly what networKING.agent looks for.
+                </p>
+              </motion.div>
+              
+              <div className="mt-16 grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                {workflowSteps.map((f, i) => (
+                  <LandingFeatureCard
+                    key={f.title}
+                    icon={f.icon}
+                    index={`0${i + 1}`}
+                    title={f.title}
+                    desc={f.desc}
+                    delay={i * 80}
+                    highlighted={f.highlighted}
+                  />
+                ))}
+              </div>
+              
+              <motion.p 
+                initial={{ opacity: 0 }}
+                whileInView={{ opacity: 1 }}
+                viewport={{ once: true }}
+                className="mt-20 text-center text-2xl sm:text-4xl font-extrabold tracking-tighter text-[#4d8565]"
+              >
+                <span className="text-[#4d8565]">AI researches.</span> <span className="text-[#ebe5d6]">You decide.</span>
+              </motion.p>
+            </div>
           </div>
-        </div>
 
-        {/* CLOSING STATEMENT */}
-        <div>
-          <div className="max-w-3xl mx-auto px-6 py-16 sm:py-20 text-center">
-            <p className="text-xl sm:text-2xl font-semibold text-[#ebe5d6] leading-snug">
-              The goal isn't to automate networking.
-              <br />
-              It's to remove the most time-consuming part of it.
-            </p>
+          {/* PIPELINE */}
+          <div className="border-b border-white/5 bg-[#09090b]/50">
+            <div className="max-w-6xl mx-auto px-6 py-24 sm:py-32 flex flex-col items-center">
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, amount: 0.8 }}
+                className="text-center max-w-2xl"
+              >
+                <h2 className="text-3xl sm:text-5xl font-bold tracking-tighter text-[#ebe5d6]">
+                  How it flows.
+                </h2>
+                <p className="mt-4 text-sm text-zinc-500 font-medium">
+                  Every profile moves through this precise sequence before a draft reaches your dashboard.
+                </p>
+              </motion.div>
+              <div className="w-full overflow-x-auto pb-8 scrollbar-hide">
+                <PipelineFlow nodes={pipelineNodes} />
+              </div>
+            </div>
+          </div>
+
+          {/* TECHNICAL */}
+          <div className="border-b border-white/5">
+            <div className="max-w-6xl mx-auto px-6 py-24 sm:py-32">
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, amount: 0.8 }}
+              >
+                <h2 className="text-3xl sm:text-5xl font-bold tracking-tighter text-[#ebe5d6]">
+                  Under the hood.
+                </h2>
+              </motion.div>
+              <div className="mt-16 grid sm:grid-cols-2 lg:grid-cols-3 gap-px bg-white/5 border border-white/5 rounded-3xl overflow-hidden">
+                {technicalItems.map((item, i) => (
+                  <motion.div
+                    key={item.title}
+                    initial={{ opacity: 0 }}
+                    whileInView={{ opacity: 1 }}
+                    viewport={{ once: true }}
+                    transition={{ delay: i * 0.1, duration: 0.5 }}
+                    onMouseMove={handleSpotlightMove}
+                    className="group relative overflow-hidden bg-[#09090b] p-8 hover:bg-white/[0.02] transition-colors"
+                  >
+                    <CardSpotlight />
+                    <div className="relative z-10">
+                      <div className="w-10 h-10 rounded-xl bg-white/[0.03] border border-white/5 flex items-center justify-center mb-6 group-hover:border-[#4d8565]/30 group-hover:bg-[#4d8565]/5 transition-colors">
+                        <item.icon size={18} className="text-[#4d8565]" strokeWidth={1.5} />
+                      </div>
+                      <p className="text-base font-semibold text-zinc-100 tracking-tight">{item.title}</p>
+                      <p className="text-sm text-zinc-500 mt-2.5 leading-relaxed">{item.text}</p>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* ROADMAP */}
+          <div className="border-b border-white/5 bg-[#09090b]/50">
+            <div className="max-w-4xl mx-auto px-6 py-24 sm:py-32 flex flex-col items-center">
+              <motion.h2 
+                initial={{ opacity: 0 }}
+                whileInView={{ opacity: 1 }}
+                viewport={{ once: true }}
+                className="text-3xl sm:text-5xl font-bold tracking-tighter text-[#ebe5d6] text-center"
+              >
+                What&apos;s next for v2.
+              </motion.h2>
+              <ul className="mt-12 space-y-4 w-full max-w-xl">
+                {roadmapItems.map((item, i) => (
+                  <motion.li 
+                    key={item} 
+                    initial={{ opacity: 0, x: -10 }}
+                    whileInView={{ opacity: 1, x: 0 }}
+                    viewport={{ once: true }}
+                    transition={{ delay: i * 0.1 }}
+                    className="flex items-start gap-4 text-base text-zinc-400 leading-relaxed p-4 rounded-2xl hover:bg-white/[0.02] transition-colors border border-transparent hover:border-white/5"
+                  >
+                    <div className="mt-1 bg-[#4d8565]/10 p-1 rounded-md border border-[#4d8565]/20 shrink-0">
+                      <ChevronRight size={14} className="text-[#4d8565]" strokeWidth={2} />
+                    </div>
+                    <span className="font-medium">{item}</span>
+                  </motion.li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          {/* CLOSING STATEMENT */}
+          <div>
+            <div className="max-w-4xl mx-auto px-6 py-32 text-center">
+              <motion.p 
+                initial={{ opacity: 0, scale: 0.95 }}
+                whileInView={{ opacity: 1, scale: 1 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.8 }}
+                className="text-2xl sm:text-4xl font-bold text-[#ebe5d6] leading-tight tracking-tighter"
+              >
+                <span className="text-[#ebe5d6]">The goal isn&apos;t to automate </span>
+                <span className="text-[#4d8565] font-extrabold">networking.</span>
+                <br />
+                <span className="text-[#ebe5d6]">It&apos;s to remove the most </span>
+                <span className="text-[#4d8565] italic">time-consuming</span>
+                <span className="text-[#ebe5d6]"> part of it.</span>
+              </motion.p>
+            </div>
           </div>
         </div>
       </div>

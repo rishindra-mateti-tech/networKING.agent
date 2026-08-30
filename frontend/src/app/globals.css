@@ -51,3 +51,12 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #3f3f46;
 }
+
+:root {
+  --theme-cream: #ebe5d6;
+  --theme-green: #4d8565;
+}
+.inverted-theme {
+  --theme-cream: #4d8565;
+  --theme-green: #ebe5d6;
+}

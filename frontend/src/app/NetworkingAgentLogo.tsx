@@ -21,7 +21,7 @@ export default function NetworkingAgentLogo({
     >
       <defs>
         <linearGradient id="nka-structure" x1="0" y1="215" x2="0" y2="680" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="#fafafa" />
+          <stop offset="0" stopColor="var(--theme-cream)" />
           <stop offset="1" stopColor="#a1a1aa" />
         </linearGradient>
       </defs>
@@ -79,13 +79,13 @@ export default function NetworkingAgentLogo({
       </g>
 
       {/* Outreach highlights — messages in flight across the graph */}
-      <g stroke="#ffffff" strokeWidth="12" strokeLinecap="round">
+      <g stroke="var(--theme-cream)" strokeWidth="12" strokeLinecap="round">
         <line x1="392" y1="437" x2="448" y2="468" />
         <line x1="618" y1="437" x2="562" y2="468" />
         <line x1="358" y1="563" x2="414" y2="592" />
         <line x1="652" y1="563" x2="596" y2="592" />
       </g>
-      <g fill="#ffffff">
+      <g fill="var(--theme-cream)">
         <circle cx="392" cy="437" r="13" />
         <circle cx="618" cy="437" r="13" />
         <circle cx="358" cy="563" r="13" />
@@ -110,7 +110,7 @@ export default function NetworkingAgentLogo({
       </g>
 
       {/* Active nodes — same emerald the pipeline uses for live workers */}
-      <g fill="#34d399">
+      <g fill="var(--theme-green)">
         <circle cx="505" cy="375" r="19" />
         <circle cx="287" cy="508" r="17" />
         <circle cx="723" cy="508" r="17" />
@@ -120,8 +120,8 @@ export default function NetworkingAgentLogo({
       </g>
 
       {/* The agent: the hub every path routes through */}
-      <circle cx="505" cy="510" r="27" fill="#09090b" stroke="#fafafa" strokeWidth="11" />
-      <circle cx="505" cy="510" r="11" fill="#34d399" />
+      <circle cx="505" cy="510" r="27" fill="#09090b" stroke="var(--theme-cream)" strokeWidth="11" />
+      <circle cx="505" cy="510" r="11" fill="var(--theme-green)" />
 
       {showWordmark && (
         <text
@@ -133,9 +133,9 @@ export default function NetworkingAgentLogo({
           fontWeight="500"
           letterSpacing="-0.02em"
         >
-          <tspan fill="#ffffff">networ</tspan>
-          <tspan fill="#34d399" fontWeight="700">KING</tspan>
-          <tspan fill="#a1a1aa">.agent</tspan>
+          <tspan fill="var(--theme-cream)">networ</tspan>
+          <tspan fill="var(--theme-green)" fontWeight="700">KING</tspan>
+          <tspan fill="var(--theme-cream)">.agent</tspan>
         </text>
       )}
     </svg>
