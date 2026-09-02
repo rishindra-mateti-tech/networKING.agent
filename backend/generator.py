@@ -1,3 +1,4 @@
+import hashlib
 import re
 import json
 import os
@@ -26,6 +27,35 @@ def _strip_json_codeblock(text: str) -> str:
     return text
 
 
+# Ordered fallback: newest and fastest first, then stable models.
+_MODEL_PREFERENCE = [
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+]
+
+# The model that last answered successfully, per key.
+#
+# Walking the preference list from the top on every call makes a key without
+# access to the newest models pay one failed round trip per missing model,
+# every single time. A profile runs six agents, so a key that only reaches the
+# fourth entry burned eighteen doomed requests per profile before this cache --
+# a large part of why processing felt slow. Keyed by a digest rather than the
+# key itself so nothing sensitive sits in a module global.
+_WORKING_MODEL = {}
+
+
+def _model_order(api_key: str):
+    """Preference list, reordered to try whatever last worked for this key first."""
+    cached = _WORKING_MODEL.get(hashlib.sha256(api_key.encode()).hexdigest())
+    if not cached:
+        return list(_MODEL_PREFERENCE)
+    return [cached] + [m for m in _MODEL_PREFERENCE if m != cached]
+
+
 def _call_gemini(api_key: str, system_instruction: str, prompt_or_contents, json_mode: bool = False) -> str:
     """
     Calls the Gemini API using a per-call Client (google-genai SDK). Each Client instance
@@ -35,15 +65,7 @@ def _call_gemini(api_key: str, system_instruction: str, prompt_or_contents, json
     """
     client = genai.Client(api_key=api_key)
 
-    # Ordered fallback: try newest/fastest first, then stable models
-    models_to_try = [
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-        "gemini-3.5-flash-lite",
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-2.0-flash-lite",
-    ]
+    models_to_try = _model_order(api_key)
     last_exception = None
 
     for model_name in models_to_try:
@@ -58,6 +80,7 @@ def _call_gemini(api_key: str, system_instruction: str, prompt_or_contents, json
                 config=config,
             )
             raw_text = response.text
+            _WORKING_MODEL[hashlib.sha256(api_key.encode()).hexdigest()] = model_name
             # Clean unicode artifacts from Gemini output
             return clean_unicode_text(raw_text)
         except Exception as e:

@@ -30,6 +30,12 @@ export default function LoginPage() {
   const [authError, setAuthError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const googleButtonRef = useRef<HTMLDivElement>(null);
+  // Whether Google's button actually made it onto the page, so the "or" divider
+  // never appears above an empty space, and so a visitor whose network blocks
+  // accounts.google.com is told to use email rather than left staring at a gap.
+  const [googleReady, setGoogleReady] = useState(false);
+  const [googleUnavailable, setGoogleUnavailable] = useState(false);
+  const googleRenderedRef = useRef(false);
 
   useEffect(() => {
     if (localStorage.getItem("token")) {
@@ -66,7 +72,8 @@ export default function LoginPage() {
   };
 
   const initGoogleButton = () => {
-    if (!GOOGLE_CLIENT_ID || !window.google || !googleButtonRef.current) return;
+    if (googleRenderedRef.current) return true;
+    if (!GOOGLE_CLIENT_ID || !window.google?.accounts?.id || !googleButtonRef.current) return false;
     window.google.accounts.id.initialize({
       client_id: GOOGLE_CLIENT_ID,
       callback: handleGoogleCredential,
@@ -78,7 +85,33 @@ export default function LoginPage() {
       width: "336",
       text: "continue_with",
     });
+    googleRenderedRef.current = true;
+    setGoogleReady(true);
+    return true;
   };
+
+  // Google's script and this component can finish in either order, and once
+  // next/script has loaded a src it does not fire onLoad again for the same
+  // script on a later client-side navigation. Arriving at /login from the
+  // landing page could therefore leave the button unrendered -- a visitor
+  // signing up for the first time had no Google option at all -- while a hard
+  // refresh reloaded the script and happened to win the race. Retrying until
+  // both halves exist removes the ordering dependency entirely.
+  useEffect(() => {
+    if (!GOOGLE_CLIENT_ID || initGoogleButton()) return;
+    const poll = setInterval(() => {
+      if (initGoogleButton()) clearInterval(poll);
+    }, 100);
+    const giveUp = setTimeout(() => {
+      clearInterval(poll);
+      if (!googleRenderedRef.current) setGoogleUnavailable(true);
+    }, 8000);
+    return () => {
+      clearInterval(poll);
+      clearTimeout(giveUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -161,9 +194,17 @@ export default function LoginPage() {
               <Script
                 src="https://accounts.google.com/gsi/client"
                 strategy="afterInteractive"
-                onLoad={initGoogleButton}
+                onReady={() => { initGoogleButton(); }}
               />
               <div ref={googleButtonRef} className="flex justify-center [&>div]:!w-full" />
+              {!googleReady && !googleUnavailable && (
+                <div className="h-10 rounded-full bg-white/[0.04] border border-white/10 animate-pulse" />
+              )}
+              {googleUnavailable && (
+                <p className="text-[11px] text-zinc-500 text-center leading-relaxed">
+                  Google sign-in couldn&apos;t load. Use your email and password below.
+                </p>
+              )}
               <div className="flex items-center gap-3 my-5">
                 <div className="h-px flex-1 bg-white/10" />
                 <span className="text-[11px] text-zinc-600 uppercase tracking-wider">or</span>

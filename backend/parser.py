@@ -249,6 +249,24 @@ def _looks_like_prose(text: str) -> bool:
     # never end in one unless it is a corporate suffix ("Acme Corp.").
     if text.endswith(".") and not _CORPORATE_SUFFIX_RE.search(text):
         return True
+    # Achievement lines people paste into the description: "2017: Top Biller",
+    # "2021 - promoted early". Real employers do start with a number ("3M",
+    # "7-Eleven", "10G Caterpillar"), so this only rejects a four-digit year
+    # used as a label.
+    if re.match(r"^(?:19|20)\d{2}\s*[:.\)\-]", text):
+        return True
+    # A pipe is headline punctuation ("Recruiter | Ex-Google"), not part of a
+    # company name.
+    if "|" in text:
+        return True
+    # A bare year on its own line is a stray date, not an employer.
+    if re.fullmatch(r"(?:19|20)\d{2}", text):
+        return True
+    # Fragments left behind when a long description wraps mid-sentence:
+    # "$2M)", "development as per the requirement". A dollar figure or a
+    # closing bracket with no opening one is never part of a company name.
+    if "$" in text or (")" in text and "(" not in text):
+        return True
     return False
 
 
@@ -301,25 +319,28 @@ def parse_experience_entries(lines: list) -> list:
                 pending.append(line)
             continue
 
-        title = None
+        title = pending[-1] if pending else None
         company = None
-        if pending:
-            title = pending[-1]
-            above = pending[-2] if len(pending) >= 2 else None
-            if above is not None and _parse_duration_text(above) is not None:
+        if len(pending) >= 2:
+            above = pending[-2]
+            if _parse_duration_text(above) is not None:
                 # Employer-level roll-up sits between company and first title
                 above = pending[-3] if len(pending) >= 3 else None
             if above and not _looks_like_prose(above) and not _looks_like_location(above):
                 company = above
+            # Otherwise the employer is genuinely unknown for this entry. It is
+            # deliberately left blank rather than inherited from the entry above:
+            # LinkedIn lists roles newest first, so borrowing the previous
+            # company would file an old job under a newer employer.
+        elif len(pending) == 1:
+            # One line between two date ranges is a second role at the same
+            # employer, which LinkedIn writes without repeating the company.
+            company = current_company
+            if company is None:
+                # Nothing established yet, so this lone line is the employer.
+                company, title = title, None
         if company:
             current_company = company
-        else:
-            company = current_company
-            # A lone line above a date range with no employer yet established
-            # is the employer, not the title.
-            if title and current_company is None and len(pending) == 1:
-                company = current_company = title
-                title = None
         pending = []
 
         start_year = int(date_match.group("s_yr"))

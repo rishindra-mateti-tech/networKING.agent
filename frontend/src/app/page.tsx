@@ -187,6 +187,127 @@ function initialsOf(name: string) {
   return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
 }
 
+// ---- Experience breakdown -------------------------------------------------
+// The backend parses one record per role out of the Experience section and
+// stores it as JSON (see models.Connection.experience_breakdown). A single
+// "5y" with nothing behind it is not something anyone can check, and when
+// somebody holds three positions at once the total genuinely looks nothing
+// like the sum of them -- so the roles it was derived from are shown too.
+
+type ExpRole = {
+  company: string | null;
+  title: string | null;
+  start: string;          // "2026-03" or "2026"
+  end: string | null;     // null means still there
+  is_current: boolean;
+  is_self_employed?: boolean;
+  months: number;
+};
+
+const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function formatMonths(total: number) {
+  if (total <= 0) return "under a month";
+  const years = Math.floor(total / 12);
+  const months = total % 12;
+  if (!years) return `${months} mo`;
+  if (!months) return `${years} yr${years > 1 ? "s" : ""}`;
+  return `${years} yr${years > 1 ? "s" : ""} ${months} mo`;
+}
+
+function formatYearMonth(value: string) {
+  const [year, month] = value.split("-");
+  if (!month) return year;
+  return `${MONTH_LABELS[Number(month) - 1] ?? ""} ${year}`.trim();
+}
+
+function formatRoleSpan(role: ExpRole) {
+  return `${formatYearMonth(role.start)} – ${role.end ? formatYearMonth(role.end) : "Present"}`;
+}
+
+function parseExperienceBreakdown(raw: string | null | undefined): ExpRole[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function ExperienceRoleRow({ role }: { role: ExpRole }) {
+  return (
+    <li className="flex items-baseline gap-2 flex-wrap">
+      <span className="text-zinc-200">{role.title || "Role"}</span>
+      {role.company && (
+        <span className="text-zinc-500">
+          at {role.company}
+          {role.is_self_employed && (
+            <span className="ml-1.5 text-[9px] uppercase tracking-wider text-zinc-600">self-employed</span>
+          )}
+        </span>
+      )}
+      <span className="ml-auto flex items-baseline gap-2 shrink-0 font-mono text-[10px] text-zinc-500">
+        <span>{formatRoleSpan(role)}</span>
+        <span className="text-zinc-400 tabular-nums">{formatMonths(role.months)}</span>
+      </span>
+    </li>
+  );
+}
+
+/**
+ * Shows how a person's experience total was arrived at: every role, split into
+ * the ones they still hold and the ones they don't, and an explicit note when
+ * overlapping roles make the total smaller than the lengths listed.
+ */
+function ExperienceBreakdown({ conn }: { conn: any }) {
+  const roles = parseExperienceBreakdown(conn.experience_breakdown);
+  if (roles.length === 0) {
+    return (
+      <p className="text-[11px] text-zinc-600">
+        {conn.profile_text
+          ? "No dated roles found in this profile's Experience section."
+          : "Added by hand, so there's no Experience section to read. Upload their LinkedIn PDF export for the role-by-role breakdown."}
+      </p>
+    );
+  }
+
+  const current = roles.filter(r => r.is_current);
+  const past = roles.filter(r => !r.is_current);
+  const summedMonths = roles.reduce((total, r) => total + r.months, 0);
+  const distinctMonths = Math.round((conn.years_experience || 0) * 12);
+  const overlaps = summedMonths - distinctMonths >= 2;
+
+  return (
+    <div className="space-y-3 text-[11px] leading-relaxed">
+      {current.length > 0 && (
+        <div>
+          <p className="text-[9px] font-semibold uppercase tracking-wider text-[#7fb894] mb-1.5">
+            Currently {current.length > 1 && `· ${current.length} roles at once`}
+          </p>
+          <ul className="space-y-1">
+            {current.map((role, i) => <ExperienceRoleRow key={`c${i}`} role={role} />)}
+          </ul>
+        </div>
+      )}
+      {past.length > 0 && (
+        <div>
+          <p className="text-[9px] font-semibold uppercase tracking-wider text-zinc-600 mb-1.5">Previously</p>
+          <ul className="space-y-1">
+            {past.map((role, i) => <ExperienceRoleRow key={`p${i}`} role={role} />)}
+          </ul>
+        </div>
+      )}
+      <p className="text-[10px] text-zinc-500 border-t border-white/5 pt-2">
+        {formatMonths(distinctMonths)} of distinct time worked.
+        {overlaps && (
+          <> These roles overlap, so their lengths add up to {formatMonths(summedMonths)} between them.</>
+        )}
+      </p>
+    </div>
+  );
+}
+
 type ConnCategory = "none" | "date" | "week" | "seniority" | "score";
 type ConnBucket = { key: string; label: string; items: any[] };
 
@@ -466,7 +587,13 @@ export default function Home() {
   const screenshotInputRef = useRef<HTMLInputElement>(null);
   const resumeInputRef = useRef<HTMLInputElement>(null);
 
-  const [isBackendOffline, setIsBackendOffline] = useState(false);
+  // Consecutive failed requests rather than a boolean. A single dropped
+  // request is normal -- a laptop waking up, a tab restored, a free-tier host
+  // cold-starting -- and flashing a red "server unreachable" banner at that is
+  // alarming out of all proportion to what happened.
+  const [backendFailures, setBackendFailures] = useState(0);
+  const isBackendOffline = backendFailures >= 2;
+  const isLocalBackend = /localhost|127\.0\.0\.1/.test(BACKEND_URL);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   // The three tabs that live inside the main workspace page
@@ -521,10 +648,10 @@ export default function Home() {
     };
     try {
       const res = await fetch(`${BACKEND_URL}${path}`, { ...options, headers });
-      setIsBackendOffline(false);
+      setBackendFailures(0);
       return res;
     } catch (err) {
-      setIsBackendOffline(true);
+      setBackendFailures(n => n + 1);
       throw err;
     }
   };
@@ -560,16 +687,26 @@ export default function Home() {
     if (token) {
       localStorage.setItem("token", token);
       loadAllData();
-      
-      // Auto-poll pipeline state every 5 seconds to track queue progress
-      const interval = setInterval(() => {
-        pollConnections();
-      }, 5000);
-      return () => clearInterval(interval);
     } else {
       localStorage.removeItem("token");
     }
   }, [token]);
+
+  // Something is actually moving through the queue, so the board is worth
+  // re-reading. When nothing is, it isn't: the old timer refetched every
+  // connection in full -- profile text, all five drafts, every agent's JSON --
+  // every five seconds for as long as the tab stayed open, which is most of
+  // what made an idle dashboard feel slow.
+  const hasQueuedWork = connections.some(
+    (c: any) => c.status === "pending" || c.status === "processing"
+  );
+  useEffect(() => {
+    if (!token || !hasQueuedWork) return;
+    // Back off while the server is unreachable rather than retrying hard at it.
+    const interval = setInterval(pollConnections, isBackendOffline ? 20000 : 5000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, hasQueuedWork, isBackendOffline]);
 
   const loadAllData = async () => {
     await Promise.all([
@@ -2110,16 +2247,33 @@ export default function Home() {
         </div>
 
         {isBackendOffline && (
-          <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2.5 text-xs text-amber-400 text-center flex items-center justify-center space-x-2 font-medium shrink-0">
-            <AlertCircle size={14} className="shrink-0" />
-            <span>Backend server unreachable ({BACKEND_URL}). Run <code className="bg-amber-950/40 px-1.5 py-0.5 rounded font-mono text-amber-300">python run.py</code> to start the FastAPI server.</span>
+          <div className="bg-amber-500/[0.07] border-b border-amber-500/20 px-4 py-2.5 text-xs text-amber-300/90 flex items-center justify-center gap-2.5 shrink-0">
+            <Loader2 size={13} className="shrink-0 animate-spin opacity-70" />
+            {isLocalBackend ? (
+              <span>
+                Can&apos;t reach your local API. Run{" "}
+                <code className="bg-amber-950/40 px-1.5 py-0.5 rounded font-mono text-amber-300">python run.py</code>{" "}
+                to start it.
+              </span>
+            ) : (
+              <span>
+                Reconnecting. The server sleeps when idle and takes up to a minute to wake up, everything
+                you&apos;ve saved is safe.
+              </span>
+            )}
+            <button
+              onClick={() => loadAllData()}
+              className="underline underline-offset-2 hover:text-amber-200 transition-colors cursor-pointer shrink-0"
+            >
+              Retry now
+            </button>
           </div>
         )}
         
         {/* The three main tabs live inside this page, not in the sidebar */}
         {currentView === "pipeline" && (
-          <div className="px-6 pt-5 pb-1 shrink-0">
-            <div className="inline-flex items-center gap-1 bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-1">
+          <div className="px-4 sm:px-6 pt-5 pb-1 shrink-0">
+            <div className="inline-flex items-center gap-1 bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl p-1 max-w-full">
               {([
                 { id: "target", label: "Outreach Target", icon: <Users size={14} /> },
                 { id: "uploads", label: "Uploads", icon: <FileText size={14} />, count: connections.length },
@@ -2128,7 +2282,7 @@ export default function Home() {
                 <button
                   key={tab.id}
                   onClick={() => setHomeTab(tab.id as any)}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                  className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-2 rounded-lg text-[11px] sm:text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                     homeTab === tab.id
                       ? "bg-white/10 text-white"
                       : "text-zinc-500 hover:text-zinc-200"
@@ -2402,136 +2556,176 @@ export default function Home() {
               }}
             />
 
-            <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-white/10 text-[10px] text-zinc-500 uppercase tracking-wider bg-white/[0.02]">
-                      <th className="text-left py-2.5 px-3 font-semibold w-8"></th>
-                      <th className="text-left py-2.5 px-3 font-semibold">PDF</th>
-                      <th className="text-left py-2.5 px-3 font-semibold">Name</th>
-                      <th className="text-left py-2.5 px-3 font-semibold">Company</th>
-                      <th className="text-left py-2.5 px-3 font-semibold">Exp @ Co</th>
-                      <th className="text-left py-2.5 px-3 font-semibold">Exp Total</th>
-                      <th className="text-left py-2.5 px-3 font-semibold">Replied</th>
-                      <th className="text-left py-2.5 px-3 font-semibold">Email</th>
-                      <th className="text-left py-2.5 px-3 font-semibold">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredConnections.map(conn => {
-                      const isExpanded = expandedUploadRow === conn.id;
-                      const hasReplied = !!conn.replied_at || ["replied", "follow_up", "interview"].includes(conn.status);
-                      return (
-                        <React.Fragment key={conn.id}>
-                          <tr className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
-                            <td className="py-2 px-3">
-                              <button
-                                onClick={() => setExpandedUploadRow(isExpanded ? null : conn.id)}
-                                className="text-zinc-500 hover:text-white cursor-pointer"
-                                aria-label={isExpanded ? "Collapse" : "Expand"}
+            {/* One card per upload rather than a nine-column table. Name,
+                company, two experience figures, reply state, email and three
+                actions never fit across a laptop viewport, so the table always
+                scrolled sideways and hid whichever column mattered. Stacking
+                the same fields lets the experience breakdown -- the part that
+                actually justifies the numbers -- sit inline instead of being
+                cut off. */}
+            <div className="space-y-2.5">
+              {filteredConnections.map(conn => {
+                const isExpanded = expandedUploadRow === conn.id;
+                const hasReplied = !!conn.replied_at || ["replied", "follow_up", "interview"].includes(conn.status);
+                const currentRoles = parseExperienceBreakdown(conn.experience_breakdown).filter((r: ExpRole) => r.is_current);
+                return (
+                  <div
+                    key={conn.id}
+                    className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl overflow-hidden"
+                  >
+                    {/* Identity + actions */}
+                    <div className="p-3.5 sm:p-4 flex items-start gap-3">
+                      <div className={`shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-[11px] font-bold ${avatarStyle(conn.networking_score)}`}>
+                        {initialsOf(conn.name)}
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            {conn.profile_url ? (
+                              <a
+                                href={conn.profile_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-sm text-zinc-100 font-semibold hover:text-[#4d8565] hover:underline inline-flex items-center gap-1.5"
                               >
-                                {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                {conn.name}
+                                <ExternalLink size={11} className="opacity-50 shrink-0" />
+                              </a>
+                            ) : (
+                              <span className="text-sm text-zinc-100 font-semibold">{conn.name}</span>
+                            )}
+                            {conn.current_title && (
+                              <p className="text-[11px] text-zinc-500 mt-0.5 line-clamp-2">{conn.current_title}</p>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              onClick={() => {
+                                setUploadsScreenshotTargetId(conn.id);
+                                uploadsScreenshotInputRef.current?.click();
+                              }}
+                              disabled={uploadsRowScreenshotLoadingId === conn.id}
+                              title="Upload a conversation screenshot"
+                              className="p-1.5 rounded bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-400 hover:text-white transition-colors cursor-pointer disabled:opacity-40"
+                            >
+                              {uploadsRowScreenshotLoadingId === conn.id
+                                ? <Loader2 size={12} className="animate-spin" />
+                                : <ImagePlus size={12} />}
+                            </button>
+                            {conn.candidate_email && (
+                              <button
+                                onClick={() => openEmailDraftPicker(conn)}
+                                disabled={emailDraftLoadingId === conn.id}
+                                title="Draft an outreach email"
+                                className="p-1.5 rounded bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-400 hover:text-white transition-colors cursor-pointer disabled:opacity-40"
+                              >
+                                {emailDraftLoadingId === conn.id
+                                  ? <Loader2 size={12} className="animate-spin" />
+                                  : <Mail size={12} />}
                               </button>
-                            </td>
-                            <td className="py-2 px-3 text-zinc-500 font-mono text-[10px] max-w-[140px] truncate" title={conn.pdf_filename || ""}>
-                              {conn.pdf_filename || "manual entry"}
-                            </td>
-                            <td className="py-2.5 px-3">
-                              <div className="flex items-center gap-2.5">
-                                <div className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold ${avatarStyle(conn.networking_score)}`}>
-                                  {initialsOf(conn.name)}
-                                </div>
-                                <div className="min-w-0">
-                                  {conn.profile_url ? (
-                                    <a
-                                      href={conn.profile_url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-zinc-100 font-medium hover:text-[#4d8565] hover:underline inline-flex items-center gap-1"
-                                    >
-                                      {conn.name}
-                                      <ExternalLink size={10} className="opacity-50" />
-                                    </a>
-                                  ) : (
-                                    <span className="text-zinc-100 font-medium">{conn.name}</span>
-                                  )}
-                                  {conn.current_title && (
-                                    <span className="block text-[10px] text-zinc-500 truncate max-w-[180px]">{conn.current_title}</span>
-                                  )}
-                                </div>
-                              </div>
-                            </td>
-                            <td className="py-2 px-3 text-zinc-400">{conn.company || "-"}</td>
-                            <td className="py-2 px-3 text-zinc-400 font-mono">
-                              {conn.current_company_years_experience ? `${conn.current_company_years_experience}y` : "-"}
-                            </td>
-                            <td className="py-2 px-3 text-zinc-400 font-mono">
-                              {conn.years_experience ? `${conn.years_experience}y` : "-"}
-                            </td>
-                            <td className="py-2 px-3">
-                              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
-                                hasReplied ? "bg-[#4d8565]/15 text-[#7fb894]" : "bg-white/5 text-zinc-500"
-                              }`}>
-                                {hasReplied ? "Yes" : "No"}
-                              </span>
+                            )}
+                            <button
+                              onClick={() => setSelectedConnection(conn)}
+                              title="Open full detail panel"
+                              className="p-1.5 rounded bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                            >
+                              <ArrowRight size={12} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Facts, wrapping instead of scrolling */}
+                        <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2.5">
+                          <div className="min-w-0">
+                            <p className="text-[9px] uppercase tracking-wider text-zinc-600">Company</p>
+                            <p className="text-[11px] text-zinc-300 truncate" title={conn.company || ""}>
+                              {conn.company || "not found"}
+                            </p>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[9px] uppercase tracking-wider text-zinc-600">Time there</p>
+                            <p className="text-[11px] text-zinc-300 tabular-nums">
+                              {conn.current_company_years_experience
+                                ? formatMonths(Math.round(conn.current_company_years_experience * 12))
+                                : "not stated"}
+                            </p>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[9px] uppercase tracking-wider text-zinc-600">Total worked</p>
+                            <p className="text-[11px] text-zinc-300 tabular-nums">
+                              {conn.years_experience
+                                ? formatMonths(Math.round(conn.years_experience * 12))
+                                : "not stated"}
+                            </p>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[9px] uppercase tracking-wider text-zinc-600">Replied</p>
+                            <p className={`text-[11px] ${hasReplied ? "text-[#7fb894]" : "text-zinc-500"}`}>
+                              {hasReplied ? "Yes" : "Not yet"}
                               {conn.conversation_verdict && (
-                                <span className="block text-[9px] text-zinc-500 mt-0.5 capitalize">
-                                  {conn.conversation_verdict.replace("_", " ")}
-                                </span>
+                                <span className="text-zinc-600 capitalize"> · {conn.conversation_verdict.replace("_", " ")}</span>
                               )}
-                            </td>
-                            <td className="py-2 px-3 max-w-[160px]">
-                              {conn.candidate_email ? (
-                                <span className="text-zinc-400 font-mono text-[10px] truncate block" title={conn.candidate_email}>
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* The plain-English version of the numbers above. A
+                            person with several jobs at once has a total that
+                            reads as wrong until you can see where it came from. */}
+                        {currentRoles.length > 1 && (
+                          <p className="mt-2.5 text-[11px] text-zinc-400 leading-relaxed">
+                            Holds {currentRoles.length} roles at the same time:{" "}
+                            {currentRoles.map((r: ExpRole, i: number) => (
+                              <span key={i}>
+                                {i > 0 && (i === currentRoles.length - 1 ? ", and " : ", ")}
+                                <span className="text-zinc-300">{r.title || "a role"}</span>
+                                {r.company && <> at <span className="text-zinc-300">{r.company}</span></>}
+                              </span>
+                            ))}
+                            . Total time worked counts overlapping months once.
+                          </p>
+                        )}
+
+                        <div className="mt-3 flex items-center justify-between gap-3 flex-wrap">
+                          <div className="flex items-center gap-2 min-w-0 text-[10px] font-mono text-zinc-600">
+                            {/* Rows saved before filenames were recorded still
+                                have the parsed profile text, so "manual entry"
+                                would be untrue for them. */}
+                            <span className="truncate max-w-[180px]" title={conn.pdf_filename || ""}>
+                              {conn.pdf_filename || (conn.profile_text ? "LinkedIn PDF" : "manual entry")}
+                            </span>
+                            {conn.candidate_email && (
+                              <>
+                                <span className="text-zinc-700">·</span>
+                                <span className="truncate max-w-[200px]" title={conn.candidate_email}>
                                   {conn.candidate_email}
                                 </span>
-                              ) : (
-                                <span className="text-zinc-600">none found</span>
-                              )}
-                            </td>
-                            <td className="py-2 px-3">
-                              <div className="flex items-center gap-1.5">
-                                <button
-                                  onClick={() => {
-                                    setUploadsScreenshotTargetId(conn.id);
-                                    uploadsScreenshotInputRef.current?.click();
-                                  }}
-                                  disabled={uploadsRowScreenshotLoadingId === conn.id}
-                                  title="Upload a conversation screenshot"
-                                  className="p-1.5 rounded bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-400 hover:text-white transition-colors cursor-pointer disabled:opacity-40"
-                                >
-                                  {uploadsRowScreenshotLoadingId === conn.id
-                                    ? <Loader2 size={12} className="animate-spin" />
-                                    : <ImagePlus size={12} />}
-                                </button>
-                                {conn.candidate_email && (
-                                  <button
-                                    onClick={() => openEmailDraftPicker(conn)}
-                                    disabled={emailDraftLoadingId === conn.id}
-                                    title="Draft an outreach email"
-                                    className="p-1.5 rounded bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-400 hover:text-white transition-colors cursor-pointer disabled:opacity-40"
-                                  >
-                                    {emailDraftLoadingId === conn.id
-                                      ? <Loader2 size={12} className="animate-spin" />
-                                      : <Mail size={12} />}
-                                  </button>
-                                )}
-                                <button
-                                  onClick={() => setSelectedConnection(conn)}
-                                  title="Open full detail panel"
-                                  className="p-1.5 rounded bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-400 hover:text-white transition-colors cursor-pointer"
-                                >
-                                  <ArrowRight size={12} />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
+                              </>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => setExpandedUploadRow(isExpanded ? null : conn.id)}
+                            className="text-[10px] text-zinc-400 hover:text-white transition-colors cursor-pointer flex items-center gap-1 shrink-0"
+                          >
+                            {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                            {isExpanded ? "Hide detail" : "Experience and drafts"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
 
-                          {isExpanded && (
-                            <tr className="bg-zinc-950/40">
-                              <td colSpan={8} className="px-3 py-4">
+                    {isExpanded && (
+                      <div className="border-t border-white/10 bg-zinc-950/40 px-3.5 sm:px-4 py-4">
                                 <div className="space-y-3">
+                                  <div className="bg-zinc-950/60 border border-white/10 rounded-lg p-3">
+                                    <span className="text-[10px] font-bold text-white uppercase tracking-wider block mb-2.5">
+                                      Where the experience numbers come from
+                                    </span>
+                                    <ExperienceBreakdown conn={conn} />
+                                  </div>
+
                                   {/* Email draft */}
                                   {conn.generated_email_body && (
                                     <div className="bg-zinc-950/60 border border-white/10 rounded-lg p-3">
@@ -2613,22 +2807,16 @@ export default function Home() {
                                     </p>
                                   )}
                                 </div>
-                              </td>
-                            </tr>
-                          )}
-                        </React.Fragment>
-                      );
-                    })}
-                    {filteredConnections.length === 0 && (
-                      <tr>
-                        <td colSpan={8} className="text-center py-12 text-zinc-600 font-mono text-[11px]">
-                          No uploads yet. Add a profile from the Outreach Target page.
-                        </td>
-                      </tr>
+                      </div>
                     )}
-                  </tbody>
-                </table>
-              </div>
+                  </div>
+                );
+              })}
+              {filteredConnections.length === 0 && (
+                <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-xl text-center py-12 text-zinc-600 font-mono text-[11px]">
+                  No uploads yet. Add a profile from the Outreach Target page.
+                </div>
+              )}
             </div>
           </div>
         )}
