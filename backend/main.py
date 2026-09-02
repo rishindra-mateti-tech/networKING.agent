@@ -560,7 +560,23 @@ def get_connections(
         query = query.filter(models.Connection.status == status)
         
     # Sort Starred connections first, then created_at order
-    return query.order_by(models.Connection.is_starred.desc(), models.Connection.created_at.desc()).all()
+    rows = query.order_by(
+        models.Connection.is_starred.desc(), models.Connection.created_at.desc()
+    ).all()
+
+    # Drop the raw PDF and posts text from the list. It is by far the largest
+    # thing on a connection -- close to half the response across a real
+    # account -- and no part of the list view reads it; the only question ever
+    # asked of it is whether it exists, which has_profile_text answers. The
+    # single-connection endpoint still returns it in full.
+    out = []
+    for row in rows:
+        payload = schemas.ConnectionOut.model_validate(row)
+        payload.has_profile_text = bool(row.profile_text)
+        payload.profile_text = None
+        payload.posts_text = None
+        out.append(payload)
+    return out
 
 @app.get("/api/connections/{connection_id}", response_model=schemas.ConnectionOut)
 def get_connection(connection_id: int, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):

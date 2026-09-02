@@ -225,6 +225,13 @@ function formatRoleSpan(role: ExpRole) {
   return `${formatYearMonth(role.start)} – ${role.end ? formatYearMonth(role.end) : "Present"}`;
 }
 
+// The list endpoint omits the raw profile text (it is the biggest field on a
+// connection and nothing here reads it) and sends has_profile_text instead;
+// the single-connection endpoint still returns the text itself.
+function cameFromLinkedInPdf(conn: any) {
+  return Boolean(conn.has_profile_text ?? conn.profile_text);
+}
+
 function parseExperienceBreakdown(raw: string | null | undefined): ExpRole[] {
   if (!raw) return [];
   try {
@@ -265,7 +272,7 @@ function ExperienceBreakdown({ conn }: { conn: any }) {
   if (roles.length === 0) {
     return (
       <p className="text-[11px] text-zinc-600">
-        {conn.profile_text
+        {cameFromLinkedInPdf(conn)
           ? "No dated roles found in this profile's Experience section."
           : "Added by hand, so there's no Experience section to read. Upload their LinkedIn PDF export for the role-by-role breakdown."}
       </p>
@@ -2694,7 +2701,7 @@ export default function Home() {
                                 have the parsed profile text, so "manual entry"
                                 would be untrue for them. */}
                             <span className="truncate max-w-[180px]" title={conn.pdf_filename || ""}>
-                              {conn.pdf_filename || (conn.profile_text ? "LinkedIn PDF" : "manual entry")}
+                              {conn.pdf_filename || (cameFromLinkedInPdf(conn) ? "LinkedIn PDF" : "manual entry")}
                             </span>
                             {conn.candidate_email && (
                               <>

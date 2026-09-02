@@ -60,6 +60,9 @@ class ConnectionOut(BaseModel):
     experience_breakdown: Optional[str] = None  # JSON list, see models.Connection
     profile_text: Optional[str] = None
     posts_text: Optional[str] = None
+    # Set on the list endpoint, which omits the raw text bodies above. The UI
+    # only ever asks whether a profile came from a PDF, never reads the text.
+    has_profile_text: Optional[bool] = None
     status: str
     is_starred: bool
     why_person: Optional[str] = None
