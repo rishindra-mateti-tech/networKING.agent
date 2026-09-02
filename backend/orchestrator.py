@@ -16,6 +16,10 @@ from generator import analyze_candidate_bridge, generate_outreach_variants
 _IDLE_POLL_MIN_SECONDS = 5
 _IDLE_POLL_MAX_SECONDS = 300
 
+# How often the reconciliation loop runs. Key changes sync workers directly, so
+# this only has to catch expired cooldowns (three minutes) and crashed workers.
+_WORKER_SYNC_INTERVAL_SECONDS = 60
+
 
 class QueueOrchestrator:
     _instance = None
@@ -48,21 +52,40 @@ class QueueOrchestrator:
         print("[ORCHESTRATOR] QueueOrchestrator stopped and all workers cancelled.")
 
     async def _orchestrator_loop(self):
-        """Periodically syncs workers for all users."""
+        """
+        Safety net that reconciles worker counts and clears expired API-key
+        cooldowns.
+
+        Not the primary path: adding, toggling or deleting a key syncs that
+        user's workers directly, and a worker looking for a key clears its own
+        expired cooldown. This used to run every ten seconds over every user in
+        the database, opening a separate session per user -- four queries and a
+        connection per user, permanently, whether or not anyone was signed in.
+        It now reuses one session, considers only users who could actually have
+        a worker, and runs a minute apart, which is well inside the three-minute
+        cooldown it exists to expire.
+        """
         while self.running:
             try:
                 db = SessionLocal()
                 try:
-                    users = db.query(models.User).all()
-                    for user in users:
-                        await self.sync_user_workers(user.id)
+                    with_keys = {
+                        row[0] for row in
+                        db.query(models.ApiKey.user_id)
+                          .filter(models.ApiKey.is_active == True)
+                          .distinct()
+                    }
+                    # Users with running workers are included even without an
+                    # active key, so those workers get torn down.
+                    for user_id in with_keys | set(self.active_workers.keys()):
+                        await self.sync_user_workers(user_id, db=db)
                 finally:
                     db.close()
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 print(f"[ORCHESTRATOR] Error in monitoring loop: {e}")
-            await asyncio.sleep(10)
+            await asyncio.sleep(_WORKER_SYNC_INTERVAL_SECONDS)
 
     def get_user_lock(self, user_id: int) -> asyncio.Lock:
         """Retrieves or creates a thread-safe lock for connection selection for a given user."""
@@ -85,15 +108,19 @@ class QueueOrchestrator:
         trigger.set()
         print(f"[ORCHESTRATOR] Trigger fired for User {user_id} — workers waking up immediately.")
 
-    async def sync_user_workers(self, user_id: int):
+    async def sync_user_workers(self, user_id: int, db: Session = None):
         """
         Dynamically adjusts the number of concurrent worker tasks for a user
         to match the number of active primary API keys they have configured.
+
+        Pass `db` to reuse an open session; the reconciliation loop does this so
+        syncing many users costs one connection rather than one each.
         """
         if not self.running:
             return
 
-        db = SessionLocal()
+        owns_session = db is None
+        db = db or SessionLocal()
         try:
             now = datetime.datetime.utcnow()
             # Clear expired cooldowns
@@ -158,7 +185,9 @@ class QueueOrchestrator:
         except Exception as e:
             print(f"[ORCHESTRATOR] Error syncing workers for User {user_id}: {e}")
         finally:
-            db.close()
+            # Never close a session the caller lent us; it has more users to sync.
+            if owns_session:
+                db.close()
 
     # Telegram rejects any single message over 4096 characters. A full outreach
     # briefing (metrics plus five drafts) regularly lands around 4200, so it was
