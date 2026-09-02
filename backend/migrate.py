@@ -62,7 +62,14 @@ def _reparse_stored_profiles(cursor, placeholder="?"):
             summary = summarize_experience(lines)
             fresh = extract_linkedin_profile_metadata(profile_text)
         except Exception as e:
-            print(f"[MIGRATE] Could not reparse connection {conn_id}: {e}")
+            # Mark it done anyway. Leaving the column null would make this row
+            # fail again on every future boot, adding a permanent cost to
+            # startup for a profile that is never going to parse.
+            print(f"[MIGRATE] Could not reparse connection {conn_id}, leaving its fields as they are: {e}")
+            cursor.execute(
+                f"UPDATE connections SET experience_breakdown = {placeholder} WHERE id = {placeholder}",
+                ("[]", conn_id),
+            )
             continue
 
         # Each of these is only overwritten when the fresh parse actually found
