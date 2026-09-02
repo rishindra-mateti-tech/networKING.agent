@@ -57,6 +57,7 @@ class ConnectionOut(BaseModel):
     connection_count: Optional[int] = None
     years_experience: float
     current_company_years_experience: Optional[float] = None
+    experience_breakdown: Optional[str] = None  # JSON list, see models.Connection
     profile_text: Optional[str] = None
     posts_text: Optional[str] = None
     status: str

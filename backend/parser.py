@@ -139,88 +139,313 @@ def _looks_like_location(text: str) -> bool:
     return False
 
 
+_MONTH_TO_NUM = {}
+for _idx, _full in enumerate(
+    ["january", "february", "march", "april", "may", "june",
+     "july", "august", "september", "october", "november", "december"],
+    start=1,
+):
+    _MONTH_TO_NUM[_full] = _idx
+    _MONTH_TO_NUM[_full[:3]] = _idx
+_MONTH_TO_NUM["sept"] = 9
+
+# One Experience entry's date line, in the shapes LinkedIn actually exports:
+#     "March 2026 - Present (5 months)"
+#     "May 2023 - July 2024 (1 year 3 months)"
+#     "2019 - 2021"
+# The trailing parenthesised duration is LinkedIn's own arithmetic, which is
+# more trustworthy than anything derived here (it knows the exact export date),
+# so it is captured and preferred when present.
+_DATE_RANGE_LINE = re.compile(
+    r"^(?:(?P<s_mon>[A-Za-z]{3,9})\.?\s+)?(?P<s_yr>(?:19|20)\d{2})"
+    r"\s*[-–—]\s*"
+    r"(?:(?:(?P<e_mon>[A-Za-z]{3,9})\.?\s+)?(?P<e_yr>(?:19|20)\d{2})"
+    r"|(?P<present>present|current))"
+    r"\s*(?:\((?P<dur>[^)]*)\))?\s*$",
+    re.IGNORECASE,
+)
+
+# A bare tenure line. LinkedIn emits one of these directly under the company
+# name when somebody held several roles at that one employer ("BeyondScroll" /
+# "1 year 2 months" / then each role). It is a roll-up of the entries below it,
+# so counting it as its own entry would double-count that whole employer.
+_DURATION_ONLY_LINE = re.compile(
+    r"^(?:(?P<yrs>\d+)\s*(?:years?|yrs?))?\s*(?:(?P<mos>\d+)\s*(?:months?|mos?))?$",
+    re.IGNORECASE,
+)
+
+_PAGE_FURNITURE = re.compile(r"^page\s+\d+\s+of\s+\d+$", re.IGNORECASE)
+
+# Headings that end the Experience section. Everything below one of these is a
+# different part of the profile, and its date ranges are emphatically not work:
+# a four-year degree under "Education" was silently inflating totals by four
+# years, which is the single largest source of wrong experience numbers.
+_SECTION_HEADINGS = {
+    "education", "licenses & certifications", "licenses and certifications",
+    "certifications", "skills", "top skills", "publications", "honors-awards",
+    "honors & awards", "honors and awards", "awards", "volunteer experience",
+    "volunteering", "languages", "interests", "recommendations", "courses",
+    "projects", "organizations", "patents", "test scores", "summary",
+    "contact", "accomplishments", "causes", "additional information",
+    "certifications & licenses",
+}
+
+
+# How LinkedIn records working for yourself. It goes in the company slot like
+# any employer, so it parses normally -- this only exists so the breakdown can
+# label it honestly instead of presenting "Self-Employed" as a firm, and so
+# these years are visibly counted rather than looking quietly dropped.
+_SELF_EMPLOYED_RE = re.compile(
+    # "Independent" only counts with one of the specific words after it, or
+    # "Independent Bank" would be read as somebody working for themselves.
+    r"^(self[\s\-]?employed|freelance(?:r|ing)?$|freelance\s|"
+    r"independent\s+(?:consultant|contractor|contracting|professional|researcher)|"
+    r"sole\s+proprietor(?:ship)?|own\s+business)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_self_employed(company: str) -> bool:
+    """True when the 'employer' on an entry is the person working for themselves."""
+    if not company:
+        return False
+    # "Self-Employed - Consulting" and "Freelance / Contract" both count
+    head = re.split(r"[·|/,]", company)[0].strip()
+    return bool(_SELF_EMPLOYED_RE.match(head))
+
+
+def _parse_duration_text(text: str):
+    """Reads "1 year 3 months" / "6 months" / "2 yrs" into a month count."""
+    if not text:
+        return None
+    m = _DURATION_ONLY_LINE.match(text.strip())
+    if not m or not (m.group("yrs") or m.group("mos")):
+        return None
+    return int(m.group("yrs") or 0) * 12 + int(m.group("mos") or 0)
+
+
+# Company names that legitimately end in a period, so the "ends with a full
+# stop means it is a sentence" rule below does not throw them away.
+_CORPORATE_SUFFIX_RE = re.compile(
+    r"\b(inc|corp|co|ltd|llc|l\.l\.c|plc|gmbh|ag|sa|nv|bv|pvt|pte|llp|s\.a|a\.s)\.$",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_prose(text: str) -> bool:
+    """
+    True for a responsibility bullet or its wrapped continuation, false for the
+    short company/title lines that sit directly above a date range. Needed
+    because a bullet's *last* line lands immediately above the next role's title
+    when a person held two roles at one employer, and would otherwise be read as
+    the employer -- one profile really did file a role under a company called
+    "and performance monitoring across backend services."
+    """
+    if text.startswith(("-", ">", "*")):
+        return True
+    if len(text) > 70:
+        return True
+    # A trailing full stop marks a finished sentence. Employers essentially
+    # never end in one unless it is a corporate suffix ("Acme Corp.").
+    if text.endswith(".") and not _CORPORATE_SUFFIX_RE.search(text):
+        return True
+    return False
+
+
+def _experience_section_lines(lines: list) -> list:
+    """The lines between the "Experience" heading and whatever heading ends it."""
+    try:
+        start = next(
+            i for i, l in enumerate(lines) if l.strip().lower() == "experience"
+        )
+    except StopIteration:
+        return []
+    out = []
+    for line in lines[start + 1:]:
+        if line.strip().lower() in _SECTION_HEADINGS:
+            break
+        out.append(line)
+    return out
+
+
+def parse_experience_entries(lines: list) -> list:
+    """
+    Reads the Experience section into one record per role, with real month
+    precision, so every number downstream can be shown its own working.
+
+    A LinkedIn export lays each entry out as company, then title, then the date
+    range, and repeats the title/date pair (without the company) for a second
+    role at the same employer. Walking forwards and treating each date line as
+    the terminator of an entry handles both shapes with one rule: the line just
+    above a date range is the title, and the line above that is the company
+    unless it is the employer-level tenure roll-up, in which case the company is
+    one line higher again.
+    """
+    section = _experience_section_lines(lines)
+    entries = []
+    current_company = None
+    pending = []  # candidate company/title lines seen since the last date line
+
+    for raw in section:
+        line = raw.strip()
+        if not line or _PAGE_FURNITURE.match(line):
+            continue
+
+        date_match = _DATE_RANGE_LINE.match(line)
+        if not date_match:
+            if _looks_like_prose(line):
+                # A bullet ends the header block; the employer still carries
+                # over to any further roles listed under it.
+                pending = []
+            else:
+                pending.append(line)
+            continue
+
+        title = None
+        company = None
+        if pending:
+            title = pending[-1]
+            above = pending[-2] if len(pending) >= 2 else None
+            if above is not None and _parse_duration_text(above) is not None:
+                # Employer-level roll-up sits between company and first title
+                above = pending[-3] if len(pending) >= 3 else None
+            if above and not _looks_like_prose(above) and not _looks_like_location(above):
+                company = above
+        if company:
+            current_company = company
+        else:
+            company = current_company
+            # A lone line above a date range with no employer yet established
+            # is the employer, not the title.
+            if title and current_company is None and len(pending) == 1:
+                company = current_company = title
+                title = None
+        pending = []
+
+        start_year = int(date_match.group("s_yr"))
+        start_month = _MONTH_TO_NUM.get((date_match.group("s_mon") or "").lower())
+        is_current = bool(date_match.group("present"))
+        if is_current:
+            today = datetime.date.today()
+            end_year, end_month = today.year, today.month
+        else:
+            end_year = int(date_match.group("e_yr"))
+            end_month = _MONTH_TO_NUM.get((date_match.group("e_mon") or "").lower())
+
+        # Year-only ranges ("2019 - 2021") carry no month, so anchor both ends
+        # at January rather than inventing a full extra year of tenure.
+        s_abs = start_year * 12 + (start_month or 1)
+        e_abs = end_year * 12 + (end_month or 1)
+        if e_abs < s_abs or (e_abs - s_abs) > 12 * 60:
+            continue
+
+        linkedin_months = _parse_duration_text(date_match.group("dur"))
+        derived_months = e_abs - s_abs + 1
+        entries.append({
+            "company": company,
+            "title": title,
+            "start_year": start_year,
+            "start_month": start_month,
+            "end_year": None if is_current else end_year,
+            "end_month": None if is_current else end_month,
+            "is_current": is_current,
+            # LinkedIn computed its own duration at export time and knew the
+            # exact export date; prefer it, and fall back to the dates.
+            "months": linkedin_months if linkedin_months is not None else derived_months,
+            "start_abs": s_abs,
+            "end_abs": e_abs + 1,  # half-open, so back-to-back roles merge
+        })
+    return entries
+
+
+def _merged_months(entries: list) -> int:
+    """
+    Distinct calendar time covered by these roles, overlaps counted once.
+
+    Somebody holding three concurrent positions has not worked three times as
+    long, and summing role durations is exactly how a student with a club
+    officer post, a campus job and an internship ends up reading as a decade of
+    experience.
+    """
+    spans = sorted((e["start_abs"], e["end_abs"]) for e in entries)
+    if not spans:
+        return 0
+    merged = [list(spans[0])]
+    for start, end in spans[1:]:
+        if start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return sum(end - start for start, end in merged)
+
+
+def summarize_experience(lines: list) -> dict:
+    """
+    Turns the Experience section into the three numbers the UI shows, plus the
+    per-role breakdown that justifies them. Returns zeroed values (and an empty
+    breakdown) when the section is missing or unparseable, rather than guessing.
+    """
+    entries = parse_experience_entries(lines)
+    if not entries:
+        return {
+            "years_experience": 0.0,
+            "current_company": None,
+            "current_company_years_experience": None,
+            "total_role_months": 0,
+            "distinct_months": 0,
+            "breakdown": [],
+        }
+
+    distinct = _merged_months(entries)
+
+    # The employer this person is filed under: the first current role listed.
+    # LinkedIn shows current positions in the order the person chose, and the
+    # one they put first is the one they lead with. Tenure is then measured
+    # against that same employer -- including any earlier roles there, so a
+    # promotion reads as continuous time rather than restarting the clock --
+    # so the number and the company name on the card always agree.
+    primary = next((e for e in entries if e["is_current"]), entries[0])
+    same_employer = [
+        e for e in entries
+        if (e["company"] or "").strip().lower() == (primary["company"] or "").strip().lower()
+    ] if primary["company"] else [primary]
+    current_tenure = _merged_months(same_employer) if primary["is_current"] else None
+
+    breakdown = [
+        {
+            "company": e["company"],
+            "title": e["title"],
+            "start": f"{e['start_year']:04d}-{e['start_month']:02d}" if e["start_month"] else str(e["start_year"]),
+            "end": (
+                None if e["is_current"]
+                else (f"{e['end_year']:04d}-{e['end_month']:02d}" if e["end_month"] else str(e["end_year"]))
+            ),
+            "is_current": e["is_current"],
+            "is_self_employed": _is_self_employed(e["company"]),
+            "months": e["months"],
+        }
+        for e in entries
+    ]
+
+    return {
+        "years_experience": round(min(distinct / 12, 60.0), 1),
+        "current_company": primary["company"],
+        "current_company_years_experience": (
+            round(current_tenure / 12, 1) if current_tenure else None
+        ),
+        "total_role_months": sum(e["months"] for e in entries),
+        "distinct_months": distinct,
+        "breakdown": breakdown,
+    }
+
+
 def _extract_company_from_experience(lines: list) -> str:
     """
-    Pulls the current employer out of the Experience section. LinkedIn PDF
-    exports order each entry as company, then role, then the date range, so
-    the first usable line after the "Experience" heading is the employer.
+    The employer to file this person under, read out of the structured parse
+    rather than off a fixed line offset -- which is what used to let a location
+    line ("United States") become somebody's employer.
     """
-    for i, line in enumerate(lines):
-        if line.strip().lower() != "experience":
-            continue
-        for candidate in lines[i + 1: i + 5]:
-            c = candidate.strip()
-            if not c:
-                continue
-            # Page furniture
-            if re.match(r"^page\s+\d+\s+of\s+\d+$", c, re.IGNORECASE):
-                continue
-            # Tenure lines: "7 years 2 months", "1 year 11 months"
-            if re.match(r"^\d+\s+(year|yr|month|mo)s?\b", c, re.IGNORECASE):
-                continue
-            # Date ranges: "September 2024 - Present", "2019 - 2021"
-            if re.match(r"^(january|february|march|april|may|june|july|august|september|october|november|december)\b", c, re.IGNORECASE):
-                continue
-            if re.match(r"^\d{4}\s*[-–]", c):
-                continue
-            if c.startswith("("):
-                continue
-            # A location line ("United States", "Greater Seattle Area") can
-            # end up first when an export's layout omits or repositions the
-            # company line -- never return one of these as the employer.
-            if _looks_like_location(c):
-                continue
-            # NOTE: deliberately not skipping every line that opens with a
-            # digit. Real employers do ("10G Caterpillar - Aerotek", "3M",
-            # "7-Eleven"), and a blanket digit rule silently demoted those to
-            # the job title on the following line.
-            if len(c) > 80:
-                continue
-            return c
-    return None
-
-
-def _extract_current_company_tenure(lines: list) -> float:
-    """
-    Approximates time spent at the CURRENT employer specifically, from the
-    duration or date range on the first entry in the Experience section.
-    LinkedIn always lists the most recent role first, so that entry -- unlike
-    years_experience, which sums the whole document -- describes the current
-    job alone.
-    """
-    current_year = datetime.date.today().year
-    for i, line in enumerate(lines):
-        if line.strip().lower() != "experience":
-            continue
-        window = lines[i + 1: i + 8]
-
-        # LinkedIn frequently computes this itself: "7 mos", "1 yr 11 mos"
-        for c in window:
-            m = re.match(
-                r"^(?:(\d+)\s*(?:years?|yrs?))?\s*(?:(\d+)\s*(?:months?|mos?))?$",
-                c.strip(), re.IGNORECASE
-            )
-            if m and (m.group(1) or m.group(2)):
-                yrs = int(m.group(1) or 0)
-                mos = int(m.group(2) or 0)
-                return round(yrs + mos / 12, 1)
-
-        # Otherwise derive it from the date range itself
-        for c in window:
-            m = re.search(
-                r"(\b20\d{2}\b)\s*[-–—]\s*(?:[A-Za-z]+\.?\s+)?(\b20\d{2}\b|Present)",
-                c, re.IGNORECASE
-            )
-            if m:
-                start_yr = int(m.group(1))
-                end = m.group(2)
-                end_yr = current_year if end.lower() == "present" else int(end)
-                diff = end_yr - start_yr
-                if diff < 0 or diff > 20:
-                    return None
-                return float(diff) if diff > 0 else 0.5
-        return None
-    return None
+    return summarize_experience(lines)["current_company"]
 
 
 def _rejoin_wrapped_urls(pdf_text: str) -> str:
@@ -470,6 +695,9 @@ def extract_linkedin_profile_metadata(pdf_text: str) -> dict:
         "connection_count": None,  # Only set below if the PDF text actually states a count
         "years_experience": 0.0,
         "current_company_years_experience": None,
+        "total_role_months": 0,
+        "distinct_months": 0,
+        "experience_breakdown": [],
         "profile_url": None,
         "email": None
     }
@@ -590,50 +818,24 @@ def extract_linkedin_profile_metadata(pdf_text: str) -> dict:
     if conn_match:
         metadata["connection_count"] = int(conn_match.group(1))
 
-    # ---- Heuristically calculate experience years ----
-    # A raw sum of every "YYYY - YYYY" match over-counts: the same tenure often
-    # appears twice (a summary blurb plus the full Experience entry), and
-    # overlapping ranges (e.g. two promotions at one company, or concurrent
-    # roles) would each add their own years on top of each other. Merging
-    # intervals first, then summing only the merged (non-overlapping) spans,
-    # gives a realistic total instead of an inflated one.
-    #
-    # LinkedIn's actual date format is "Month YYYY - Month YYYY" (e.g. "April
-    # 2021 - June 2025"), not bare "YYYY - YYYY". A pattern that only allows
-    # whitespace between the dash and the second year misses every completed
-    # role outright, since a month name sits between them, undercounting
-    # total experience down to just whatever "X - Present" range happens to
-    # exist (or to nothing at all, if even that range spans under a year).
-    year_ranges = re.findall(
-        r"(\b20\d{2}\b)\s*[-\u2013\u2014]\s*(?:[A-Za-z]+\.?\s+)?(\b20\d{2}\b|Present)",
-        pdf_text, re.IGNORECASE
-    )
-    current_year = datetime.date.today().year
-
-    intervals = []
-    for start, end in year_ranges:
-        start_yr = int(start)
-        end_yr = current_year if end.lower() == "present" else int(end)
-        diff = end_yr - start_yr
-        if 0 < diff < 20:  # Sanity filter
-            intervals.append((start_yr, end_yr))
-
-    total_years = 0.0
-    if intervals:
-        intervals.sort()
-        merged = [intervals[0]]
-        for start_yr, end_yr in intervals[1:]:
-            last_start, last_end = merged[-1]
-            if start_yr <= last_end:  # overlapping or duplicate, extend/merge
-                merged[-1] = (last_start, max(last_end, end_yr))
-            else:
-                merged.append((start_yr, end_yr))
-        total_years = sum(end_yr - start_yr for start_yr, end_yr in merged)
-
-    if total_years > 0:
-        metadata["years_experience"] = round(min(total_years, 35.0), 1)
-
-    metadata["current_company_years_experience"] = _extract_current_company_tenure(lines)
+    # ---- Experience ----
+    # Read only the Experience section, one record per role, at month
+    # precision. Two things this deliberately does not do, because both
+    # produced badly wrong numbers:
+    #   - scan the whole document. A "(2020 - 2024)" degree under Education is
+    #     not four years of work, and neither is a certification year.
+    #   - sum role durations. Concurrent roles (a campus job, a club officer
+    #     post and an internship held at once) each contributed their own full
+    #     span, so overlapping time was counted two and three times over.
+    # See summarize_experience: overlapping spans are merged before totalling,
+    # and the per-role breakdown is carried through so the UI can show the
+    # difference between time worked and roles held.
+    experience = summarize_experience(lines)
+    metadata["years_experience"] = experience["years_experience"]
+    metadata["current_company_years_experience"] = experience["current_company_years_experience"]
+    metadata["total_role_months"] = experience["total_role_months"]
+    metadata["distinct_months"] = experience["distinct_months"]
+    metadata["experience_breakdown"] = experience["breakdown"]
 
     return metadata
 

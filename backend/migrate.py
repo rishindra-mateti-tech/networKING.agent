@@ -21,6 +21,53 @@ def _encrypt_existing_api_keys(cursor):
             print(f"[MIGRATE] Encrypted plaintext API key id={key_id} at rest.")
 
 
+def _backfill_experience_breakdown(cursor, placeholder="?"):
+    """
+    Recomputes experience for rows stored before the Experience section was
+    parsed properly. Those totals were summed over the whole document, so a
+    four-year degree under Education counted as four years of work, and
+    concurrent roles were each counted in full -- a student with a campus job,
+    a club post and an internship could read as a decade of experience.
+
+    Only touches rows that still have no breakdown, and writes an empty list
+    when a profile genuinely has no parseable Experience section so the same
+    rows are not re-examined on every boot.
+    """
+    import json
+    from parser import summarize_experience
+
+    cursor.execute(
+        "SELECT id, profile_text FROM connections "
+        "WHERE experience_breakdown IS NULL AND profile_text IS NOT NULL"
+    )
+    rows = cursor.fetchall()
+    if not rows:
+        return
+
+    updated = 0
+    for conn_id, profile_text in rows:
+        try:
+            lines = [l.strip() for l in (profile_text or "").split("\n") if l.strip()]
+            summary = summarize_experience(lines)
+        except Exception as e:
+            print(f"[MIGRATE] Could not recompute experience for connection {conn_id}: {e}")
+            continue
+        cursor.execute(
+            f"UPDATE connections SET experience_breakdown = {placeholder}, "
+            f"years_experience = {placeholder}, "
+            f"current_company_years_experience = {placeholder} "
+            f"WHERE id = {placeholder}",
+            (
+                json.dumps(summary["breakdown"]),
+                summary["years_experience"],
+                summary["current_company_years_experience"],
+                conn_id,
+            ),
+        )
+        updated += 1
+    print(f"[MIGRATE] Recomputed experience from the Experience section for {updated} connection(s).")
+
+
 def _resolve_db_path() -> str:
     """Mirrors database.py's DATABASE_URL resolution so migrations hit the same file."""
     database_url = os.getenv("DATABASE_URL", "")
@@ -49,6 +96,7 @@ _NEW_CONNECTION_COLUMNS = [
     ("current_company_years_experience", "REAL", "DOUBLE PRECISION"),
     ("posts_screenshot_path", "TEXT", "TEXT"),
     ("company_locked", "BOOLEAN", "BOOLEAN"),
+    ("experience_breakdown", "TEXT", "TEXT"),
 ]
 _NEW_INTERACTION_LOG_COLUMNS = [
     ("screenshot_path", "TEXT", "TEXT"),
@@ -67,6 +115,8 @@ def _run_postgres_migrations(database_url: str):
             cursor.execute(f"ALTER TABLE interaction_logs ADD COLUMN IF NOT EXISTS {col_name} {pg_type}")
         conn.commit()
         print("[MIGRATE] Postgres: verified/added new columns on connections and interaction_logs.")
+        _backfill_experience_breakdown(cursor, placeholder="%s")
+        conn.commit()
     except Exception as e:
         print(f"[MIGRATE] Postgres migration error: {e}")
         conn.rollback()
@@ -141,6 +191,9 @@ def run_migrations():
     if cursor.fetchone():
         _encrypt_existing_api_keys(cursor)
         conn.commit()
+
+    _backfill_experience_breakdown(cursor)
+    conn.commit()
 
     conn.close()
     print("Database migrations checked/completed successfully.")

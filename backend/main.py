@@ -671,6 +671,7 @@ async def upload_linkedin_profile(
     connection_count_val = connection_count
     years_experience = 0.0
     current_company_years_experience = None
+    experience_breakdown = None
     pdf_filename = None
     candidate_email = None
 
@@ -690,6 +691,8 @@ async def upload_linkedin_profile(
                 connection_count_val = extracted["connection_count"]
             years_experience = extracted["years_experience"]
             current_company_years_experience = extracted.get("current_company_years_experience")
+            if extracted.get("experience_breakdown"):
+                experience_breakdown = json.dumps(extracted["experience_breakdown"])
             if not profile_url:
                 profile_url = extracted.get("profile_url")
             candidate_email = extracted.get("email")
@@ -755,6 +758,8 @@ async def upload_linkedin_profile(
             existing.years_experience = years_experience
         if current_company_years_experience is not None:
             existing.current_company_years_experience = current_company_years_experience
+        if experience_breakdown:
+            existing.experience_breakdown = experience_breakdown
         if profile_text:
             existing.profile_text = profile_text
         if posts:
@@ -803,6 +808,7 @@ async def upload_linkedin_profile(
         connection_count=connection_count_val,
         years_experience=years_experience,
         current_company_years_experience=current_company_years_experience,
+        experience_breakdown=experience_breakdown,
         profile_text=profile_text,
         posts_text=posts,
         profile_url=profile_url,

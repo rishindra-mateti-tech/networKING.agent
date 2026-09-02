@@ -96,7 +96,48 @@ def validate_api_key(api_key: str) -> dict:
         return {"valid": False, "error": str(e)}
 
 
-def run_profile_intelligence_agent(api_key: str, name: str, profile_text: str, posts_text: str, screenshot_path: str = None, posts_screenshot_path: str = None) -> dict:
+def _format_experience_facts(experience: Optional[dict]) -> str:
+    """
+    Renders the parsed Experience section as plain facts for the prompt.
+
+    The model is far better at reading a career than at doing date arithmetic
+    over a PDF, and it has no way to know that three roles running at once are
+    not three separate careers. These numbers come straight from the dates on
+    the profile, so the agent is told to use them rather than estimate.
+    """
+    if not experience or not experience.get("breakdown"):
+        return ""
+    rows = []
+    for e in experience["breakdown"]:
+        span = f"{e['start']} to {e['end'] or 'Present'}"
+        months = e["months"]
+        label = f"{months // 12}y {months % 12}m" if months >= 12 else f"{months}m"
+        tags = []
+        if e["is_current"]:
+            tags.append("current")
+        if e.get("is_self_employed"):
+            tags.append("self-employed")
+        rows.append(
+            f"      - {e['title'] or 'Role'} at {e['company'] or 'Unknown'} "
+            f"({span}, {label}){' [' + ', '.join(tags) + ']' if tags else ''}"
+        )
+    current = [e for e in experience["breakdown"] if e["is_current"]]
+    concurrent_note = ""
+    if len(current) > 1:
+        concurrent_note = (
+            f"\n    NOTE: {len(current)} of these roles are held at the same time right now. "
+            "Do not describe this person as having the sum of these tenures, and do not treat "
+            "concurrent part-time, student, club or volunteer positions as career seniority."
+        )
+    return f"""
+    PARSED EXPERIENCE (read directly off the dates in the profile, use these numbers as-is):
+{chr(10).join(rows)}
+    Distinct time worked, overlaps counted once: {experience.get('years_experience')} years.
+    Sum of every role's length (overlaps counted repeatedly, shown only for contrast): {round(experience.get('total_role_months', 0) / 12, 1)} years.{concurrent_note}
+"""
+
+
+def run_profile_intelligence_agent(api_key: str, name: str, profile_text: str, posts_text: str, screenshot_path: str = None, posts_screenshot_path: str = None, experience: Optional[dict] = None) -> dict:
     """
     Agent 1: Profile Intelligence Agent
     Extracts name, role (title), seniority, company, follower count, education,
@@ -123,7 +164,8 @@ def run_profile_intelligence_agent(api_key: str, name: str, profile_text: str, p
     RECENT POSTS TEXT:
     {posts_text or "No posts text provided."}
     {"A screenshot of their recent posts is attached below the profile screenshot (if any). Read any text visible in it and factor it into recent_posts and tone." if posts_screenshot_path else ""}
-    
+    {_format_experience_facts(experience)}
+
     Analyze the profile text and optional screenshot (if provided) to return a JSON object with the following fields:
     - "name": Candidate's full name.
     - "role": Current title/role.
@@ -131,8 +173,10 @@ def run_profile_intelligence_agent(api_key: str, name: str, profile_text: str, p
     - "seniority": Seniority category. Must be one of: "CEO", "Founder", "Recruiter", "Senior SWE", "Principal Engineer", "Engineering Manager", "University Alum", "HR", "VP", "Director", "Other".
     - "company": Current company name.
     - "follower_count": Candidate's follower count if visible (e.g. "1,200", "50k", or "Under 500"). If not found, output "Under 500".
-    - "years_experience": Approximate TOTAL years of professional experience across their entire career,
-      every employer combined (float/number).
+    - "years_experience": TOTAL years of professional experience. If a PARSED EXPERIENCE block appears
+      above, copy its "distinct time worked" figure exactly and do not recalculate it -- it was read off
+      the dates on the profile and already accounts for roles held at the same time. Only estimate when
+      no such block is present.
     - "current_company_years_experience": Approximate years spent at their CURRENT company specifically
       (float/number), which is very often much smaller than years_experience. A senior director with 16
       years of total experience who joined their current company 1 year ago should report
@@ -775,8 +819,22 @@ def analyze_candidate_bridge(api_key: str, twin_profile: str, candidate_name: st
     startups), where free-text extraction from a PDF/screenshot can't reliably
     know which one the user means -- the user's explicit choice always wins.
     """
-    # 1. Profile Intelligence
-    profile_intel = run_profile_intelligence_agent(api_key, candidate_name, candidate_profile, candidate_posts, screenshot_path, posts_screenshot_path)
+    # 1. Profile Intelligence, handed the dates already parsed off the profile
+    # so it reports experience rather than estimating it. Derived here rather
+    # than passed in, because the raw profile text is the only input this needs.
+    experience = None
+    if candidate_profile:
+        try:
+            from parser import summarize_experience
+            experience = summarize_experience(
+                [l.strip() for l in candidate_profile.split("\n") if l.strip()]
+            )
+        except Exception as e:
+            print(f"[BRIDGE] Could not summarize experience, agent will estimate: {e}")
+    profile_intel = run_profile_intelligence_agent(
+        api_key, candidate_name, candidate_profile, candidate_posts,
+        screenshot_path, posts_screenshot_path, experience=experience,
+    )
     if company_override and company_override.strip():
         profile_intel["company"] = company_override.strip()
 

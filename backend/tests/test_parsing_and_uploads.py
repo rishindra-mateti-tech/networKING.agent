@@ -56,6 +56,153 @@ def run():
         except Exception as exc:
             r.check(f"resume contact parse survives: {label}", False, f"{type(exc).__name__}: {exc}")
 
+    # ---- experience is read off the Experience section, at month precision ----
+    # Regression cases from two real exports. Both used to report exactly 5.0
+    # years: the old parser summed every "YYYY - YYYY" in the whole document,
+    # so a four-year degree under Education counted as four years of work.
+    CONCURRENT_STUDENT = """Lohitha Donuri
+Computer Science Graduate Student
+United States
+Experience
+graduate studies wright state university
+Graduate student advisory board
+April 2026 - Present (6 months)
+Entrepreneurship Club at Wright State
+outreach chair
+January 2026 - Present (9 months)
+United States
+Page 1 of 3
+Wright State University
+Event Support Coordinator - Nutter Center
+November 2025 - Present (11 months)
+United States
+ss steels
+Software Engineer
+May 2023 - July 2024 (1 year 3 months)
+Hyderabad
+Improved operational efficiency by approximately 15% across several locations
+through cross functional program coordination.
+Swayam ED-cell,Vasavi College Of Engineering
+Student Volunteer
+May 2021 - June 2024 (3 years 2 months)
+Hyderabad
+viclipy
+Founder
+January 2021 - June 2024 (3 years 6 months)
+Hyderabad
+Education
+Wright State University
+Master's degree, Computer Science (January 2025 - December 2026)
+Vasavi College of Engg
+Bachelor of Engineering - BE, Information Technology (2020 - 2024)
+"""
+
+    PROMOTED_AT_ONE_EMPLOYER = """Rishindra Mateti
+AI Engineer Intern
+Dallas-Fort Worth Metroplex
+Experience
+ZUZU
+AI Engineer Intern
+March 2026 - Present (5 months)
+- Build an AI-powered student onboarding platform.
+Wright State University
+Student Technology Support Analyst
+November 2025 - Present (9 months)
+United States
+- Support event-day technology and operations at the Nutter Center.
+BeyondScroll
+1 year 2 months
+Junior Software Engineer
+March 2024 - August 2024 (6 months)
+Hyderabad
+- Contributed to data synchronization, exception handling, functional testing,
+and performance monitoring across backend services.
+Backend Engineering Intern
+July 2023 - February 2024 (8 months)
+Hyderabad
+Education
+INSTITUTE OF AERONAUTICAL ENGINEERING
+Bachelor of Technology - BTech, Computer Science and
+Engineering (2020 - 2024)
+"""
+
+    lohitha = P.extract_linkedin_profile_metadata(CONCURRENT_STUDENT)
+    r.check(
+        "education years are not counted as work experience",
+        lohitha["years_experience"] == 4.5,
+        f"expected 4.5, got {lohitha['years_experience']}",
+    )
+    r.check(
+        "concurrent roles are merged, not summed",
+        lohitha["years_experience"] < lohitha["total_role_months"] / 12,
+        "overlapping roles were summed",
+    )
+    r.check(
+        "every role appears in the breakdown",
+        len(lohitha["experience_breakdown"]) == 6,
+        f"got {len(lohitha['experience_breakdown'])} entries",
+    )
+    r.check(
+        "all three concurrent roles are flagged current",
+        sum(1 for e in lohitha["experience_breakdown"] if e["is_current"]) == 3,
+        "wrong current-role count",
+    )
+    r.check(
+        "sub-year tenure is measured, not defaulted",
+        lohitha["current_company_years_experience"] == 0.5,
+        f"got {lohitha['current_company_years_experience']}",
+    )
+
+    rishindra = P.extract_linkedin_profile_metadata(PROMOTED_AT_ONE_EMPLOYER)
+    r.check(
+        "months are counted, not just whole years",
+        rishindra["years_experience"] == 2.1,
+        f"expected 2.1, got {rishindra['years_experience']}",
+    )
+    r.check(
+        "company is the first current role, not a location",
+        rishindra["company"] == "ZUZU",
+        f"got {rishindra['company']}",
+    )
+    r.check(
+        "a second role under one employer keeps that employer",
+        [e["company"] for e in rishindra["experience_breakdown"]].count("BeyondScroll") == 2,
+        "a bullet line was read as the employer",
+    )
+    r.check(
+        "employer-level tenure roll-up is not its own entry",
+        len(rishindra["experience_breakdown"]) == 4,
+        f"got {len(rishindra['experience_breakdown'])} entries",
+    )
+
+    SELF_EMPLOYED = """Jordan Rivera
+Consultant
+Experience
+Self-Employed
+Independent Data Consultant
+January 2019 - Present (7 years 8 months)
+Remote
+Education
+Some University
+BS (2014 - 2018)
+"""
+    self_emp = P.extract_linkedin_profile_metadata(SELF_EMPLOYED)
+    r.check(
+        "self-employment counts as experience",
+        self_emp["years_experience"] > 7,
+        f"got {self_emp['years_experience']}",
+    )
+    r.check(
+        "self-employment is labelled as such",
+        self_emp["experience_breakdown"][0]["is_self_employed"] is True,
+        "not flagged",
+    )
+    r.check(
+        "a real employer is not mistaken for self-employment",
+        P._is_self_employed("Independent Bank Group") is False,
+        "false positive",
+    )
+
     # ---- slug normalisation (documented to return "" when no /in/ slug exists) ----
     for raw, expected in [
         ("", ""),

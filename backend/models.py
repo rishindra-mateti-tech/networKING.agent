@@ -35,8 +35,14 @@ class Connection(Base):
     company_locked = Column(Boolean, default=False)
     location = Column(String, nullable=True)
     connection_count = Column(Integer, nullable=True)  # left null until the user or a parsed PDF actually states one
-    years_experience = Column(Float, default=0.0)  # total career experience, every employer combined
+    years_experience = Column(Float, default=0.0)  # distinct calendar time worked, concurrent roles counted once
     current_company_years_experience = Column(Float, nullable=True)  # tenure at their CURRENT company only, set by the AI pipeline
+    # JSON list of every role parsed out of the Experience section, one entry
+    # per role: company, title, start, end, is_current, is_self_employed,
+    # months. Stored so the UI can show its working -- somebody holding three
+    # concurrent positions has a total that looks nothing like the sum of them,
+    # and an unexplained number reads as a bug.
+    experience_breakdown = Column(Text, nullable=True)
     
     # Ingested details
     profile_text = Column(Text, nullable=True)  # From PDF profile
