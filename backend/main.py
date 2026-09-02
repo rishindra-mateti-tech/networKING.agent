@@ -9,7 +9,6 @@ from typing import List, Optional
 from fastapi import FastAPI, Depends, HTTPException, Request, status, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 from sqlalchemy.orm import Session
@@ -81,12 +80,20 @@ def health_check():
     """Cheap, no-DB-touch endpoint for uptime pingers to keep a free-tier host from sleeping."""
     return {"status": "ok"}
 
-# Mount uploads directory to serve screenshots static files. Overridable so a
-# deployed instance can point at a persistent volume instead of the working
+# Where uploaded LinkedIn and conversation screenshots are written. Overridable
+# so a deployed instance can point at a persistent volume instead of the working
 # directory, which would otherwise be wiped on every redeploy.
+#
+# Deliberately NOT mounted as a static route. It used to be served at /uploads
+# with no authentication, which published every account's uploaded profile and
+# conversation screenshots to anyone who had or guessed a filename -- in a
+# multi-tenant app that promises per-account isolation. Nothing ever fetched
+# that URL: the images are opened server-side by path when an agent reads them
+# (see generator.py), so removing the mount closes the hole and costs nothing.
+# Serving them to their owner would need an authenticated, ownership-checked
+# endpoint or signed URLs, not a bare static mount.
 UPLOADS_DIR = os.getenv("UPLOADS_DIR", "uploads")
 os.makedirs(UPLOADS_DIR, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
 # CORS middleware — scoped to CORS_ORIGINS (backend/.env), defaults to the local Next.js dev server.
 app.add_middleware(

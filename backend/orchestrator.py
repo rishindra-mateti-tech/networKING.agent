@@ -10,6 +10,13 @@ from database import SessionLocal
 from twin_agent import compile_twin_agent_profile, get_sender_name
 from generator import analyze_candidate_bridge, generate_outreach_variants
 
+# Idle backoff bounds for a worker whose queue is empty. Uploading a profile or
+# pressing "Process Queue Now" wakes workers through the user trigger, so these
+# only govern how often an idle worker touches the database on its own.
+_IDLE_POLL_MIN_SECONDS = 5
+_IDLE_POLL_MAX_SECONDS = 300
+
+
 class QueueOrchestrator:
     _instance = None
 
@@ -269,15 +276,20 @@ class QueueOrchestrator:
         or manual 'Process Queue Now' clicked).
         """
         trigger = self.get_user_trigger(user_id)
-        trigger.clear()  # Reset the trigger before sleeping
+        # Deliberately not cleared before waiting. A trigger fired while this
+        # worker was busy generating would otherwise be thrown away here, and
+        # the worker would sleep out the full duration having already missed
+        # the signal. Clearing afterwards instead means a trigger raised at any
+        # moment is honoured by the next sleep, which is what makes a long idle
+        # backoff safe.
         try:
             await asyncio.wait_for(trigger.wait(), timeout=seconds)
-            # If we get here, the trigger was set — clear it for next use
-            trigger.clear()
             print(f"[ORCHESTRATOR] Sleep interrupted by trigger for User {user_id}.")
         except asyncio.TimeoutError:
             # Normal timeout — sleep completed naturally
             pass
+        finally:
+            trigger.clear()
 
     async def _worker_loop(self, user_id: int, worker_name: str, worker_index: int = 0):
         """
@@ -285,6 +297,14 @@ class QueueOrchestrator:
         Pulls connection queue items, processes using Gemini APIs, handles cooldown failover, and sends alerts.
         """
         print(f"[WORKER] {worker_name} started for User {user_id}.")
+        # How long to wait after finding nothing to do. Every worker used to
+        # re-open a database session and poll every five seconds forever, so an
+        # app with nobody using it still hammered the database around the clock
+        # -- enough on a free-tier Postgres to keep the instance from ever
+        # idling down. Uploading a profile or pressing "Process Queue Now"
+        # fires the trigger and wakes every worker immediately, so waiting
+        # longer between empty polls costs no responsiveness.
+        idle_seconds = _IDLE_POLL_MIN_SECONDS
         while self.running:
             db = SessionLocal()
             connection = None
@@ -306,10 +326,14 @@ class QueueOrchestrator:
                         db.commit()
                         db.refresh(connection)
 
-                # If no pending connection, use interruptible sleep and try again
+                # If no pending connection, back off and try again. The delay
+                # doubles up to the cap while the queue stays empty and resets
+                # the moment there is work.
                 if not connection:
-                    await self._interruptible_sleep(user_id, 5)
+                    await self._interruptible_sleep(user_id, idle_seconds)
+                    idle_seconds = min(idle_seconds * 2, _IDLE_POLL_MAX_SECONDS)
                     continue
+                idle_seconds = _IDLE_POLL_MIN_SECONDS
 
                 print(f"[WORKER] {worker_name} picked connection: {connection.name} (Starred: {connection.is_starred})")
 

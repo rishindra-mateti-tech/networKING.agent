@@ -1958,15 +1958,15 @@ export default function Home() {
         )}
         {conn.current_company_years_experience != null && conn.current_company_years_experience > 0 && (
           <span
-            title={`${conn.current_company_years_experience} years at ${conn.company || "current company"}`}
+            title={`${formatMonths(Math.round(conn.current_company_years_experience * 12))} at ${conn.company || "their current company"}`}
             className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded border bg-amber-500/10 text-amber-300 border-amber-500/25"
           >
-            {conn.current_company_years_experience}y@co
+            {formatMonths(Math.round(conn.current_company_years_experience * 12))} here
           </span>
         )}
         {conn.years_experience > 0 && (
           <span
-            title={`${conn.years_experience} years of total experience`}
+            title={`${formatMonths(Math.round(conn.years_experience * 12))} worked in total, counting concurrent roles once`}
             className={`text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded border ${
               conn.years_experience >= 10
                 ? "bg-violet-500/10 text-violet-300 border-violet-500/25"
@@ -1975,7 +1975,7 @@ export default function Home() {
                 : "bg-white/5 text-zinc-300 border-white/10"
             }`}
           >
-            {conn.years_experience}y total
+            {formatMonths(Math.round(conn.years_experience * 12))} worked
           </span>
         )}
         {conn.networking_score && (
@@ -4572,14 +4572,33 @@ export default function Home() {
                             <span className="text-[10px] text-zinc-500">Seniority</span>
                             <span className="text-white font-medium">{data.seniority || "N/A"}</span>
                           </div>
-                          <div className="flex justify-between border-b border-zinc-800 pb-1">
-                            <span className="text-[10px] text-zinc-500">Experience at {data.company || "current company"}</span>
-                            <span className="text-white font-medium">{selectedConnection.current_company_years_experience ? `${selectedConnection.current_company_years_experience} Yrs` : "N/A"}</span>
+                          <div className="flex justify-between border-b border-zinc-800 pb-1 gap-3">
+                            <span className="text-[10px] text-zinc-500 shrink-0">Time at {selectedConnection.company || data.company || "current company"}</span>
+                            <span className="text-white font-medium text-right">
+                              {selectedConnection.current_company_years_experience
+                                ? formatMonths(Math.round(selectedConnection.current_company_years_experience * 12))
+                                : "not stated"}
+                            </span>
                           </div>
-                          <div className="flex justify-between border-b border-zinc-800 pb-1">
-                            <span className="text-[10px] text-zinc-500">Total Experience</span>
-                            <span className="text-white font-medium">{selectedConnection.years_experience ? `${selectedConnection.years_experience} Yrs` : "N/A"}</span>
+                          <div className="flex justify-between border-b border-zinc-800 pb-1 gap-3">
+                            <span className="text-[10px] text-zinc-500 shrink-0">Total time worked</span>
+                            <span className="text-white font-medium text-right">
+                              {selectedConnection.years_experience
+                                ? formatMonths(Math.round(selectedConnection.years_experience * 12))
+                                : "not stated"}
+                            </span>
                           </div>
+                          {/* The roles the two figures above were computed from,
+                              so the number is checkable instead of asserted. */}
+                          <details className="border-b border-zinc-800 pb-2 group">
+                            <summary className="text-[10px] text-zinc-500 cursor-pointer hover:text-zinc-300 transition-colors list-none flex items-center gap-1">
+                              <ChevronRight size={11} className="transition-transform group-open:rotate-90" />
+                              Every role these came from
+                            </summary>
+                            <div className="pt-2.5">
+                              <ExperienceBreakdown conn={selectedConnection} />
+                            </div>
+                          </details>
                           <div className="flex justify-between border-b border-zinc-800 pb-1">
                             <span className="text-[10px] text-zinc-500">Target Angle</span>
                             <span className="text-zinc-300 font-semibold">{data.best_conversation_angle || "N/A"}</span>

@@ -132,6 +132,19 @@ def run():
     forged = client.get("/api/connections", headers={"Authorization": "Bearer not.a.real.token"})
     r.check("forged token rejected", forged.status_code in (401, 403), f"status {forged.status_code}")
 
+    # ---- uploaded files are not served over HTTP at all ----
+    # /uploads was once a public StaticFiles mount, which handed every account's
+    # profile and conversation screenshots to anyone with a filename. Nothing
+    # fetches them over HTTP -- agents open them by path server-side -- so the
+    # route should simply not exist.
+    for path in ("/uploads/", "/uploads/anything.png"):
+        resp = client.get(path)
+        r.check(
+            f"uploaded files not publicly served: {path}",
+            resp.status_code == 404,
+            f"status {resp.status_code}",
+        )
+
     # ---- account rules ----
     dup = client.post("/api/auth/register", json={"email": a_email, "password": "otherpass"})
     r.check("duplicate email registration refused", dup.status_code == 400, f"status {dup.status_code}")
