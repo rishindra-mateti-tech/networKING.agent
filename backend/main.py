@@ -8,7 +8,7 @@ import secrets
 from typing import List, Optional
 from fastapi import FastAPI, Depends, HTTPException, Request, status, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 from sqlalchemy.orm import Session
@@ -1045,6 +1045,40 @@ async def upload_conversation_screenshot(
     db.commit()
     db.refresh(new_log)
     return new_log
+
+@app.get("/api/connections/{connection_id}/logs/{log_id}/screenshot")
+def get_log_screenshot(
+    connection_id: int,
+    log_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Serves one conversation screenshot to the account that uploaded it.
+
+    Replaces the public /uploads static mount, which served every account's
+    images to anyone holding a filename. The row is looked up by log id AND
+    connection id AND user id, so a valid token for one account cannot reach
+    another's file. The stored path is also re-checked against the uploads
+    directory before opening, so a path that somehow escaped it (a doctored
+    row, a future writer that forgets to sanitise a filename) cannot be used
+    to read arbitrary files off the server.
+    """
+    log = db.query(models.InteractionLog).filter(
+        models.InteractionLog.id == log_id,
+        models.InteractionLog.connection_id == connection_id,
+        models.InteractionLog.user_id == current_user.id,
+    ).first()
+    if not log or not log.screenshot_path:
+        raise HTTPException(status_code=404, detail="Screenshot not found")
+
+    uploads_root = os.path.realpath(UPLOADS_DIR)
+    resolved = os.path.realpath(log.screenshot_path)
+    if os.path.commonpath([uploads_root, resolved]) != uploads_root or not os.path.isfile(resolved):
+        raise HTTPException(status_code=404, detail="Screenshot not found")
+
+    return FileResponse(resolved)
+
 
 @app.post("/api/connections/{connection_id}/generate-reply")
 def generate_followup_suggestion(

@@ -225,6 +225,58 @@ function formatRoleSpan(role: ExpRole) {
   return `${formatYearMonth(role.start)} – ${role.end ? formatYearMonth(role.end) : "Present"}`;
 }
 
+/**
+ * An <img> for a file that only the signed-in account may read.
+ *
+ * Uploaded screenshots are no longer served from a public directory, so a plain
+ * src would come back 404: the endpoint needs an Authorization header, and an
+ * <img> tag cannot send one. Fetching the bytes and pointing the tag at an
+ * object URL is the way to keep the request authenticated, and the URL is
+ * revoked on unmount so the blob is not held for the life of the page.
+ */
+function AuthedImage({ path, alt, className }: { path: string; alt: string; className?: string }) {
+  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let created: string | null = null;
+    setObjectUrl(null);
+    setFailed(false);
+
+    const token = localStorage.getItem("token");
+    fetch(`${BACKEND_URL}${path}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then(res => (res.ok ? res.blob() : Promise.reject(new Error(String(res.status)))))
+      .then(blob => {
+        if (cancelled) return;
+        created = URL.createObjectURL(blob);
+        setObjectUrl(created);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+
+    return () => {
+      cancelled = true;
+      if (created) URL.revokeObjectURL(created);
+    };
+  }, [path]);
+
+  if (failed) {
+    return (
+      <p className="text-[10px] text-zinc-500 font-mono border border-dashed border-zinc-800 rounded-md px-2 py-3 text-center">
+        Screenshot unavailable. Files are lost when the server redeploys.
+      </p>
+    );
+  }
+  if (!objectUrl) {
+    return <div className={`bg-white/5 rounded-md animate-pulse ${className || "h-24"}`} />;
+  }
+  return <img src={objectUrl} alt={alt} className={className} />;
+}
+
 // The list endpoint omits the raw profile text (it is the biggest field on a
 // connection and nothing here reads it) and sends has_profile_text instead;
 // the single-connection endpoint still returns the text itself.
@@ -645,6 +697,16 @@ export default function Home() {
   const [redraftCompany, setRedraftCompany] = useState("");
   const [redraftInstructions, setRedraftInstructions] = useState("");
   const [redraftLoading, setRedraftLoading] = useState(false);
+
+  // Hold the page still while the detail panel is open. Without this the list
+  // behind the overlay scrolls under the cursor, which reads as the panel
+  // itself refusing to scroll.
+  useEffect(() => {
+    if (!selectedConnection) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previous; };
+  }, [selectedConnection]);
 
   // Fetch helper with Authorization header
   const fetchWithAuth = async (path: string, options: RequestInit = {}) => {
@@ -2712,11 +2774,18 @@ export default function Home() {
                               </>
                             )}
                           </div>
+                          {/* Styled as a real control rather than a caption:
+                              at 10px grey it read as metadata and people did
+                              not find the breakdown behind it. */}
                           <button
                             onClick={() => setExpandedUploadRow(isExpanded ? null : conn.id)}
-                            className="text-[10px] text-zinc-400 hover:text-white transition-colors cursor-pointer flex items-center gap-1 shrink-0"
+                            className={`text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border transition-colors cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                              isExpanded
+                                ? "bg-white/[0.07] border-white/15 text-zinc-200 hover:bg-white/10"
+                                : "bg-[#4d8565]/15 border-[#4d8565]/35 text-[#8fc7a4] hover:bg-[#4d8565]/25 hover:border-[#4d8565]/55"
+                            }`}
                           >
-                            {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                            {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                             {isExpanded ? "Hide detail" : "Experience and drafts"}
                           </button>
                         </div>
@@ -4355,10 +4424,10 @@ export default function Home() {
             onClick={() => setSelectedConnection(null)}
             className="fixed inset-0 bg-black/70 backdrop-blur-sm z-40"
           />
-          <div className="fixed inset-3 sm:inset-6 lg:inset-10 z-50 bg-zinc-950/95 backdrop-blur-xl border border-white/10 rounded-2xl flex flex-col overflow-hidden shadow-2xl">
+          <div className="fixed inset-2 sm:inset-4 lg:inset-6 z-50 bg-zinc-950/95 backdrop-blur-xl border border-white/10 rounded-2xl flex flex-col overflow-hidden shadow-2xl">
 
           {/* Header: identity on the left, current stage on the right */}
-          <div className="px-5 py-4 border-b border-white/10 flex items-start justify-between gap-4 shrink-0">
+          <div className="px-5 py-3 border-b border-white/10 flex items-start justify-between gap-4 shrink-0">
             <div className="min-w-0">
               <div className="flex items-center space-x-2">
                 <h2 className="text-base font-bold text-white truncate">{selectedConnection.name}</h2>
@@ -4415,13 +4484,19 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-5 grid lg:grid-cols-12 gap-5 items-start content-start">
+          {/* Each column scrolls on its own from lg up. Sharing one scroll
+              container made the panel as tall as whichever column was longer,
+              so reading the agent's profile analysis on the left pushed the
+              follow-up controls on the right off the bottom of the screen and
+              everything had to be scrolled past to reach anything. Below lg the
+              columns stack, where a single scroll is the right behaviour. */}
+          <div className="flex-1 min-h-0 overflow-y-auto lg:overflow-hidden p-4 grid lg:grid-cols-12 gap-4 items-start content-start lg:items-stretch">
 
             {/* LEFT COLUMN: reference material */}
-            <div className="lg:col-span-5 space-y-4">
+            <div className="lg:col-span-5 space-y-3.5 lg:h-full lg:overflow-y-auto lg:pr-1.5">
 
             {/* Networking Intelligence Signals */}
-            <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-4">
+            <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-3.5 space-y-3">
               <h3 className="text-xs font-bold text-white uppercase tracking-wider border-b border-zinc-800 pb-2">
                 Networking Intelligence Signals
               </h3>
@@ -4544,7 +4619,7 @@ export default function Home() {
 
             {/* Multi-Agent Intelligence Tabs */}
             {selectedConnection.profile_intelligence && (
-              <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-4">
+              <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-3.5 space-y-3">
                 <h3 className="text-xs font-bold text-white uppercase tracking-wider border-b border-zinc-800 pb-2">Outreach Agent Intelligence</h3>
                 
                 {/* Tabs selection */}
@@ -4783,7 +4858,7 @@ export default function Home() {
 
             {/* Stage 1 details (Bridge alignment metrics fallback) */}
             {selectedConnection.best_angle && !selectedConnection.profile_intelligence && (
-              <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-3">
+              <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-3.5 space-y-2.5">
                 <h3 className="text-xs font-bold text-white uppercase tracking-wider border-b border-zinc-800 pb-2">Why message this person?</h3>
                 <div>
                   <span className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block">Best Outreach Angle</span>
@@ -4803,11 +4878,11 @@ export default function Home() {
             </div>
 
             {/* RIGHT COLUMN: the things you actually act on */}
-            <div className="lg:col-span-7 space-y-4">
+            <div className="lg:col-span-7 space-y-3.5 lg:h-full lg:overflow-y-auto lg:pr-1.5">
 
             {/* Generated Outreach Copy Variants */}
             {selectedConnection.generated_outreach_short && (
-              <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-4">
+              <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-3.5 space-y-3">
                 <h3 className="text-xs font-bold text-white uppercase tracking-wider border-b border-zinc-800 pb-2">Generated Outreach Drafts</h3>
                 
                 {/* Tabs */}
@@ -4834,8 +4909,11 @@ export default function Home() {
                 </div>
 
                 {/* Draft text Area */}
-                <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-lg p-4 relative">
-                  <p className="text-xs text-zinc-200 whitespace-pre-wrap leading-relaxed font-mono">
+                <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-lg p-3.5 relative">
+                  {/* The draft is the one variable-length thing in this column. Capping
+                      it keeps Copy / Redraft / Mark Sent on screen instead of
+                      letting a long draft push them below the fold. */}
+                  <p className="text-xs text-zinc-200 whitespace-pre-wrap leading-relaxed font-mono max-h-[34vh] overflow-y-auto pr-1">
                     {selectedVariant === "referral" && (selectedConnection.generated_outreach_referral || selectedConnection.generated_outreach_short)}
                     {selectedVariant === "coffee" && (selectedConnection.generated_outreach_coffee || selectedConnection.generated_outreach_warm)}
                     {selectedVariant === "technical" && (selectedConnection.generated_outreach_technical || selectedConnection.generated_outreach_tech)}
@@ -4849,7 +4927,7 @@ export default function Home() {
                     {selectedVariant === "mixed" && (selectedConnection.generated_outreach_relationship || selectedConnection.generated_outreach_mixed)}
                   </p>
 
-                  <div className="flex justify-end items-center space-x-2 mt-4 pt-3 border-t border-zinc-800/80">
+                  <div className="flex justify-end items-center space-x-2 mt-3 pt-2.5 border-t border-zinc-800/80">
                     <button 
                       onClick={() => handleCopyClipboard(
                         selectedVariant === "referral" ? (selectedConnection.generated_outreach_referral || selectedConnection.generated_outreach_short) :
@@ -4888,13 +4966,13 @@ export default function Home() {
             )}
 
             {/* Conversation Log & Thread Follow-ups */}
-            <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 space-y-4">
+            <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-3.5 space-y-3">
               <h3 className="text-xs font-bold text-white uppercase tracking-wider border-b border-zinc-800 pb-2 flex items-center space-x-2">
                 <MessageSquare size={14} className="text-emerald-400" />
                 <span>Thread Interaction Log</span>
               </h3>
-              <p className="text-[10px] text-zinc-400">
-                Pasting responses here allows the follow-up generator to analyze thread history and suggest responses.
+              <p className="text-[10px] text-zinc-500 -mt-1">
+                Paste their replies here so follow-ups can read the thread.
               </p>
 
               {/* Conversation Quality Verdict, from the most recently analyzed screenshot */}
@@ -4921,7 +4999,7 @@ export default function Home() {
               )}
 
               {/* History Messages */}
-              <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
+              <div className="space-y-3 max-h-52 overflow-y-auto pr-1">
                 {threadLogs.map(log => (
                   <div
                     key={log.id}
@@ -4935,8 +5013,8 @@ export default function Home() {
                       {log.sender === "user" ? "You" : selectedConnection.name}
                     </span>
                     {log.screenshot_path ? (
-                      <img
-                        src={`${BACKEND_URL}/${log.screenshot_path}`}
+                      <AuthedImage
+                        path={`/api/connections/${selectedConnection.id}/logs/${log.id}/screenshot`}
                         alt="Conversation screenshot"
                         className="rounded-md max-h-48 object-contain border border-zinc-800"
                       />
@@ -4947,14 +5025,14 @@ export default function Home() {
                 ))}
 
                 {threadLogs.length === 0 && (
-                  <div className="text-center py-6 text-[10px] text-zinc-600 font-mono border border-dashed border-zinc-800 rounded-lg">
+                  <div className="text-center py-3 text-[10px] text-zinc-600 font-mono border border-dashed border-zinc-800 rounded-lg">
                     Log empty. Add replies to seed follow-up context.
                   </div>
                 )}
               </div>
 
               {/* Add Log Box */}
-              <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-lg p-3 space-y-3">
+              <div className="bg-white/[0.05] backdrop-blur-xl border border-white/[0.14] rounded-lg p-2.5 space-y-2.5">
                 <textarea 
                   value={newLogMessage}
                   onChange={e => setNewLogMessage(e.target.value)}
@@ -5005,7 +5083,7 @@ export default function Home() {
               <button
                 onClick={() => conversationScreenshotInputRef.current?.click()}
                 disabled={screenshotUploadLoading}
-                className="w-full flex items-center justify-center gap-2 bg-zinc-900 border border-dashed border-zinc-700 hover:border-zinc-600 text-zinc-400 hover:text-white px-3 py-2.5 text-[11px] rounded-lg font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 bg-zinc-900 border border-dashed border-zinc-700 hover:border-zinc-600 text-zinc-400 hover:text-white px-3 py-2 text-[11px] rounded-lg font-semibold transition-colors cursor-pointer disabled:opacity-50"
               >
                 <ImagePlus size={13} className={screenshotUploadLoading ? "animate-pulse" : ""} />
                 <span>{screenshotUploadLoading ? "Reading conversation..." : "Upload Conversation Screenshot for AI Read"}</span>

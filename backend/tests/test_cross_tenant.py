@@ -41,11 +41,12 @@ def run():
         headers=a_headers,
         json={"settings": [{"key": "tone_examples", "value": "A private tone"}]},
     )
-    client.post(
+    log = client.post(
         f"/api/connections/{conn_id}/logs",
         headers=a_headers,
         json={"message": "A private log", "sender": "user"},
     )
+    log_id = log.json().get("id") if log.status_code == 200 else 1
 
     # ---- reads ----
     got = client.get(f"/api/connections/{conn_id}", headers=b_headers)
@@ -63,6 +64,27 @@ def run():
         "read another tenant's logs",
         logs.status_code == 404 or (logs.status_code == 200 and logs.json() == []),
         f"status {logs.status_code} body {logs.text[:120]}",
+    )
+
+    # Uploaded screenshots are reachable only through this endpoint now, so it
+    # carries the isolation the removed static mount never had.
+    shot = client.get(f"/api/connections/{conn_id}/logs/{log_id}/screenshot", headers=b_headers)
+    r.check(
+        "read another tenant's log screenshot",
+        shot.status_code == 404,
+        f"status {shot.status_code}",
+    )
+    own_shot = client.get(f"/api/connections/{conn_id}/logs/{log_id}/screenshot", headers=a_headers)
+    r.check(
+        "own log with no screenshot is a 404, not a server error",
+        own_shot.status_code == 404,
+        f"status {own_shot.status_code}",
+    )
+    anon_shot = client.get(f"/api/connections/{conn_id}/logs/{log_id}/screenshot")
+    r.check(
+        "log screenshot needs authentication",
+        anon_shot.status_code in (401, 403),
+        f"status {anon_shot.status_code}",
     )
 
     keys = client.get("/api/keys", headers=b_headers)
