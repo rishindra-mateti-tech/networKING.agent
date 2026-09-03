@@ -187,6 +187,76 @@ function initialsOf(name: string) {
   return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
 }
 
+// ---- Grounding ------------------------------------------------------------
+// Every factual claim in a draft is checked back against the profile it was
+// written from (backend/grounding.py). What matters at the moment of sending is
+// not the aggregate rate but the specific sentences that have nothing behind
+// them, so those are named rather than scored.
+
+type GroundedClaim = {
+  variant: string;
+  claim: string;
+  subject: "candidate" | "sender" | "neither";
+  supported: boolean;
+};
+
+function parseGroundingReport(raw: string | null | undefined) {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || !parsed.ok || !parsed.summary) return null;
+    return parsed as {
+      ok: boolean;
+      summary: { claims_checked: number; supported: number; unsupported: number; grounded_rate: number | null };
+      claims: GroundedClaim[];
+      regenerated?: boolean;
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Unsupported claims in one draft, named so they can be edited out before sending. */
+function GroundingNotice({ report, variant }: { report: any; variant: string }) {
+  if (!report) return null;
+  const claims: GroundedClaim[] = report.claims || [];
+  const forVariant = claims.filter(c => c.variant === variant);
+  const unsupported = forVariant.filter(c => !c.supported);
+
+  if (forVariant.length === 0) return null;
+
+  if (unsupported.length === 0) {
+    return (
+      <div className="flex items-center gap-1.5 text-[10px] text-[#7fb894]">
+        <Check size={11} className="shrink-0" />
+        <span>
+          All {forVariant.length} factual {forVariant.length === 1 ? "claim" : "claims"} in this draft trace back to their profile.
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.07] p-2.5">
+      <div className="flex items-center gap-1.5 text-[10px] font-semibold text-amber-300">
+        <AlertCircle size={11} className="shrink-0" />
+        <span>
+          {unsupported.length} of {forVariant.length} claims in this draft are not in their profile. Check before sending.
+        </span>
+      </div>
+      <ul className="mt-1.5 space-y-1">
+        {unsupported.map((c, i) => (
+          <li key={i} className="text-[10px] text-amber-200/70 leading-relaxed pl-3.5 relative">
+            <span className="absolute left-0 top-[0.45em] w-1 h-1 rounded-full bg-amber-400/60" />
+            {c.claim}
+            {c.subject === "sender" && <span className="text-amber-200/40"> (about you, not them)</span>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 // ---- Experience breakdown -------------------------------------------------
 // The backend parses one record per role out of the Experience section and
 // stores it as JSON (see models.Connection.experience_breakdown). A single
@@ -4926,6 +4996,16 @@ export default function Home() {
                     {selectedVariant === "tech" && (selectedConnection.generated_outreach_technical || selectedConnection.generated_outreach_tech)}
                     {selectedVariant === "mixed" && (selectedConnection.generated_outreach_relationship || selectedConnection.generated_outreach_mixed)}
                   </p>
+
+                  {/* What in this specific draft is not backed by the profile.
+                      Placed above the send controls, because after Copy Draft
+                      it is too late to matter. */}
+                  <div className="mt-3">
+                    <GroundingNotice
+                      report={parseGroundingReport(selectedConnection.grounding_report)}
+                      variant={selectedVariant}
+                    />
+                  </div>
 
                   <div className="flex justify-end items-center space-x-2 mt-3 pt-2.5 border-t border-zinc-800/80">
                     <button 

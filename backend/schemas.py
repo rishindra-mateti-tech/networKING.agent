@@ -101,6 +101,7 @@ class ConnectionOut(BaseModel):
     relationship_strategy: Optional[str] = None
     personalization_data: Optional[str] = None
     context_summary: Optional[str] = None
+    grounding_report: Optional[str] = None  # JSON, see grounding.py
     error_message: Optional[str] = None
     sent_at: Optional[datetime] = None
     replied_at: Optional[datetime] = None

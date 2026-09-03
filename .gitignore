@@ -31,3 +31,8 @@ Thumbs.db
 
 # Local AI-assistant tooling config, not part of the app
 .claude/
+
+# Grounding evaluation output. Contains generated draft text and claims derived
+# from real people's profiles, so it stays local.
+backend/grounding_run.json
+backend/*_run.json

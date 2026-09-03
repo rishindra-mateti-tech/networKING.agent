@@ -13,12 +13,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import test_cross_tenant
 import test_generation_robustness
+import test_grounding
 import test_parsing_and_uploads
 
 MODULES = [
     test_cross_tenant,
     test_parsing_and_uploads,
     test_generation_robustness,
+    test_grounding,
 ]
 
 

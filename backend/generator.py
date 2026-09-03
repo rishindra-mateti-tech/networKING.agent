@@ -28,14 +28,23 @@ def _strip_json_codeblock(text: str) -> str:
 
 
 # Ordered fallback: newest and fastest first, then stable models.
+#
+# Probed against a live key on 2026-09-02: gemini-2.5-flash, gemini-2.0-flash
+# and gemini-2.0-flash-lite are all retired and answer 404. Leaving them in
+# meant every call that got past the live models paid three round trips into
+# dead endpoints and then reported "this model is no longer available" as the
+# failure, which points at the wrong problem entirely when the real cause is a
+# quota limit on the model at the top of the list. _RETIRED_MODELS below keeps
+# this list from needing hand-maintenance as more are withdrawn.
 _MODEL_PREFERENCE = [
     "gemini-3.6-flash",
     "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
 ]
+
+# Models that answered 404 in this process. A withdrawn model does not come
+# back, so there is no reason to spend a request rediscovering that.
+_RETIRED_MODELS = set()
 
 # The model that last answered successfully, per key.
 #
@@ -48,12 +57,41 @@ _MODEL_PREFERENCE = [
 _WORKING_MODEL = {}
 
 
+def _error_rank(exc: Exception) -> int:
+    """
+    How useful a failure is to report. Higher wins.
+
+    When several models are tried, the last error is usually the least
+    informative: a 404 from a withdrawn model at the tail of the list says
+    nothing about why the first choice failed. Quota and auth problems are what
+    the user can actually act on, so those are the ones that surface.
+    """
+    text = str(exc).lower()
+    code = exc.code if isinstance(exc, APIError) else None
+    if code in (401, 403) or "api key" in text or "permission" in text or "unauthenticated" in text:
+        return 4  # the key itself is wrong: the most actionable thing there is
+    if code == 429 or "quota" in text or "resource_exhausted" in text:
+        return 3  # out of quota: actionable, and the usual real cause
+    if code in (500, 503) or "unavailable" in text or "overloaded" in text:
+        return 2  # transient: worth telling the user to retry
+    if code == 404 or "no longer available" in text or "not found" in text:
+        return 0  # a model we chose to try is gone: not the user's problem
+    return 1
+
+
+def _is_more_useful(candidate: Exception, incumbent: Exception) -> bool:
+    return _error_rank(candidate) > _error_rank(incumbent)
+
+
 def _model_order(api_key: str):
-    """Preference list, reordered to try whatever last worked for this key first."""
+    """Preference list, minus anything withdrawn, best-known model first."""
+    live = [m for m in _MODEL_PREFERENCE if m not in _RETIRED_MODELS]
     cached = _WORKING_MODEL.get(hashlib.sha256(api_key.encode()).hexdigest())
-    if not cached:
-        return list(_MODEL_PREFERENCE)
-    return [cached] + [m for m in _MODEL_PREFERENCE if m != cached]
+    if cached and cached not in _RETIRED_MODELS:
+        return [cached] + [m for m in live if m != cached]
+    # Everything is retired: fall back to the full list so the caller gets a
+    # real API error rather than a silent no-op.
+    return live or list(_MODEL_PREFERENCE)
 
 
 def _call_gemini(api_key: str, system_instruction: str, prompt_or_contents, json_mode: bool = False) -> str:
@@ -84,15 +122,31 @@ def _call_gemini(api_key: str, system_instruction: str, prompt_or_contents, json
             # Clean unicode artifacts from Gemini output
             return clean_unicode_text(raw_text)
         except Exception as e:
-            last_exception = e
             code = e.code if isinstance(e, APIError) else None
             error_str = str(e).lower()
-            # If model not found (404), deprecated, or rate-limited (429), try the next model
-            if code in (404, 429):
+
+            # A withdrawn model is permanently gone. Record it so the rest of
+            # this process stops paying a round trip to find that out again.
+            if code == 404 or "no longer available" in error_str or "not found" in error_str:
+                _RETIRED_MODELS.add(model_name)
+
+            # Keep the most actionable failure, not merely the last one. A 404
+            # from the tail of the list tells the user nothing; the 429 that
+            # made us fall through in the first place is the real answer.
+            if not isinstance(last_exception, Exception) or _is_more_useful(e, last_exception):
+                last_exception = e
+            # Model missing (404), deprecated, rate-limited (429), or the model
+            # itself being overloaded (500/503): all reasons to try the next
+            # model rather than give up. 503 in particular is Gemini shedding
+            # load on one model while others answer fine, and treating it as
+            # fatal turned a transient spike into a failed run.
+            if code in (404, 429, 500, 503):
                 continue
             if "404" in error_str or "not found" in error_str or "deprecated" in error_str:
                 continue
             if "429" in error_str or "quota" in error_str or "rate" in error_str:
+                continue
+            if "503" in error_str or "500" in error_str or "unavailable" in error_str or "overloaded" in error_str:
                 continue
             # For other errors (auth, network), don't retry different models
             raise
@@ -602,6 +656,7 @@ def run_message_writing_agent(
     tone_examples: str,
     sender_name: str = "the user",
     custom_instructions: Optional[str] = None,
+    grounding_feedback: Optional[str] = None,
 ) -> dict:
     """
     Agent 5: Message Writing Agent
@@ -678,6 +733,11 @@ def run_message_writing_agent(
     or angle choice below when they conflict with this):
     {custom_instructions}
     ''' if custom_instructions else ""}
+    {f'''
+    GROUNDING CORRECTION (this outranks every style instruction below -- an accurate
+    message that is duller is always better than a specific one that is invented):
+    {grounding_feedback}
+    ''' if grounding_feedback else ""}
 
     PERSONALIZATION DETAILS:
     - Motivation Hooks: {personalization_json.get("motivation_hooks")}
@@ -899,7 +959,7 @@ def analyze_candidate_bridge(api_key: str, twin_profile: str, candidate_name: st
     }
 
 
-def generate_outreach_variants(api_key: str, twin_profile: str, candidate_name: str, candidate_profile: str, candidate_posts: str, bridge_data: dict, tone_examples: str = "", sender_name: str = "the user", custom_instructions: Optional[str] = None) -> dict:
+def generate_outreach_variants(api_key: str, twin_profile: str, candidate_name: str, candidate_profile: str, candidate_posts: str, bridge_data: dict, tone_examples: str = "", sender_name: str = "the user", custom_instructions: Optional[str] = None, grounding_feedback: Optional[str] = None) -> dict:
     """
     Stage 2: Message Writing Agent.
     Runs the writing agent using synthesized intermediate outputs.
@@ -922,7 +982,70 @@ def generate_outreach_variants(api_key: str, twin_profile: str, candidate_name: 
         tone_examples=tone_examples,
         sender_name=sender_name,
         custom_instructions=custom_instructions,
+        grounding_feedback=grounding_feedback,
     )
+
+
+def generate_single_prompt_baseline(
+    api_key: str,
+    twin_profile: str,
+    candidate_name: str,
+    candidate_profile: str,
+    candidate_posts: str = "",
+    sender_name: str = "the user",
+) -> dict:
+    """
+    The obvious version of this product: hand the whole profile to the model and
+    ask for messages, with no research stages in between.
+
+    Exists purely as a control. The five-stage pipeline costs six model calls per
+    profile against this one, and until the two are measured on the same profiles
+    with the same scorer there is no evidence the extra five buy anything. Kept
+    deliberately fair -- same output shape, same five angles, the same anti-cliche
+    rules the real writing agent gets -- so any difference is attributable to the
+    pipeline rather than to a hobbled baseline.
+    """
+    system_instruction = (
+        f"You write LinkedIn outreach messages in the voice of {sender_name}. "
+        "You never use an em dash or en dash. You never use AI-cliche phrasing like "
+        "'hope this finds you well', 'reaching out because', 'pick your brain', or "
+        "'excited to connect'. You never output bracketed placeholders. "
+        "You return only raw JSON."
+    )
+    prompt = f"""
+ABOUT THE SENDER ({sender_name}):
+{twin_profile}
+
+THE RECIPIENT'S LINKEDIN PROFILE ({candidate_name}):
+{candidate_profile or "No profile text provided."}
+
+THEIR RECENT POSTS:
+{candidate_posts or "No posts provided."}
+
+Write five short LinkedIn outreach messages from {sender_name} to {candidate_name}, one for
+each of these angles:
+- referral: asking about opportunities on their team
+- coffee: asking for a short informal conversation
+- technical: opening on shared technical ground
+- relationship: building a longer-term connection with no immediate ask
+- featured: opening on something specific they have published or built
+
+Each should be 60-120 words, specific to this person, and signed off the way a real person
+would write it.
+
+Return ONLY raw JSON, no markdown fence:
+{{"referral": "...", "coffee": "...", "technical": "...", "relationship": "...", "featured": "..."}}
+"""
+    try:
+        raw = _call_gemini(api_key, system_instruction, prompt, json_mode=True)
+        data = json.loads(_strip_json_codeblock(raw))
+        return {
+            k: clean_unicode_text(str(data.get(k) or ""))
+            for k in ["referral", "coffee", "technical", "relationship", "featured"]
+        }
+    except Exception as e:
+        print(f"[BASELINE] Single-prompt generation failed: {e}")
+        return {k: "" for k in ["referral", "coffee", "technical", "relationship", "featured"]}
 
 
 def generate_thread_followup(api_key: str, twin_profile: str, candidate_profile: str, thread_history: list, user_intent: str = None, sender_name: str = "the user") -> str:

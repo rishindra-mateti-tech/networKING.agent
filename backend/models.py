@@ -105,6 +105,11 @@ class Connection(Base):
     personalization_data = Column(Text, nullable=True)
     context_summary = Column(Text, nullable=True)
     
+    # Result of checking every factual claim in the generated drafts back against
+    # the source material (see grounding.py). JSON: per-claim verdicts plus the
+    # summary rates. Null for rows generated before grounding existed.
+    grounding_report = Column(Text, nullable=True)
+
     error_message = Column(Text, nullable=True)
 
     # Timestamps for reply-time analytics. Set once, at the moment the status

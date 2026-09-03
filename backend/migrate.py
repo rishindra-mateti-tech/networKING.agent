@@ -141,6 +141,7 @@ _NEW_CONNECTION_COLUMNS = [
     ("posts_screenshot_path", "TEXT", "TEXT"),
     ("company_locked", "BOOLEAN", "BOOLEAN"),
     ("experience_breakdown", "TEXT", "TEXT"),
+    ("grounding_report", "TEXT", "TEXT"),
 ]
 _NEW_INTERACTION_LOG_COLUMNS = [
     ("screenshot_path", "TEXT", "TEXT"),

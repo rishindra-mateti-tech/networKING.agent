@@ -9,6 +9,29 @@ import models
 from database import SessionLocal
 from twin_agent import compile_twin_agent_profile, get_sender_name
 from generator import analyze_candidate_bridge, generate_outreach_variants
+from grounding import VARIANT_KEYS, evaluate_drafts, regeneration_feedback
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    """
+    An on/off switch read from the environment at call time, not import time,
+    so quota can be reclaimed on a running deployment by setting a variable and
+    restarting, with no code change and no redeploy of a different build.
+    """
+    import os
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in ("0", "false", "no", "off")
+
+
+def j_dumps(value) -> str:
+    """json.dumps that can never take down a generation that already succeeded."""
+    import json
+    try:
+        return json.dumps(value)
+    except Exception:
+        return "{}"
 
 # Idle backoff bounds for a worker whose queue is empty. Uploading a profile or
 # pressing "Process Queue Now" wakes workers through the user trigger, so these
@@ -298,6 +321,118 @@ class QueueOrchestrator:
         except Exception as e:
             print(f"[ORCHESTRATOR] Failed to send Slack alert: {e}")
 
+    async def _ground_and_correct(
+        self, worker_name, api_key, connection, variants, bridge_data,
+        twin_profile, tone_examples, sender_name,
+    ):
+        """
+        Checks the drafts against their source and, if anything is unsupported,
+        rewrites once. Returns (variants, report); report is None when the check
+        did not run.
+
+        Nothing in here is allowed to raise. Generation has already succeeded by
+        this point at a cost of six model calls, and grounding is an improvement
+        on finished work. Left inline, a quota error during the correction pass
+        would reach the worker's failure handler, put the key on a three-minute
+        cooldown and re-run the whole pipeline -- throwing away good drafts and
+        spending another six calls to reproduce them. On a free tier that turns
+        one 429 into a spiral. The worst outcome here is the drafts standing
+        exactly as generated, unannotated.
+
+        Cost, per profile: +2 calls to check, +3 more only when a rewrite is
+        attempted. Both halves can be turned off independently by environment
+        variable when quota is tight, without touching code.
+        """
+        if not _env_flag("GROUNDING_ENABLED", True):
+            return variants, None
+
+        report = None
+        try:
+            report = await asyncio.to_thread(
+                evaluate_drafts,
+                api_key=api_key,
+                drafts={k: variants.get(k) for k in VARIANT_KEYS},
+                candidate_source=self._candidate_source(connection),
+                sender_source=twin_profile,
+                candidate_name=connection.name,
+                sender_name=sender_name,
+            )
+
+            if not _env_flag("GROUNDING_AUTOCORRECT", True):
+                return variants, report
+
+            feedback = regeneration_feedback(report)
+            if not feedback:
+                return variants, report
+
+            print(f"[WORKER] {worker_name} found {report['summary']['unsupported']} "
+                  f"unsupported claim(s) for {connection.name}; regenerating once.")
+            corrected = await asyncio.to_thread(
+                generate_outreach_variants,
+                api_key=api_key,
+                twin_profile=twin_profile,
+                candidate_name=connection.name,
+                candidate_profile=connection.profile_text or "",
+                candidate_posts=connection.posts_text or "",
+                bridge_data=bridge_data,
+                tone_examples=tone_examples,
+                sender_name=sender_name,
+                grounding_feedback=feedback,
+            )
+            recheck = await asyncio.to_thread(
+                evaluate_drafts,
+                api_key=api_key,
+                drafts={k: corrected.get(k) for k in VARIANT_KEYS},
+                candidate_source=self._candidate_source(connection),
+                sender_source=twin_profile,
+                candidate_name=connection.name,
+                sender_name=sender_name,
+            )
+            # Keep the rewrite only if it actually grounded better. A correction
+            # pass that made things worse is not an improvement just because it
+            # was asked for.
+            if self._is_better(recheck, report):
+                recheck["regenerated"] = True
+                recheck["previous_grounded_rate"] = report["summary"]["grounded_rate"]
+                return corrected, recheck
+            report["regenerated"] = False
+            report["regeneration_rejected"] = True
+            return variants, report
+
+        except Exception as e:
+            print(f"[WORKER] {worker_name} grounding step failed for {connection.name} "
+                  f"(non-fatal, drafts kept as generated): {e}")
+            return variants, report
+
+    @staticmethod
+    def _candidate_source(connection) -> str:
+        """
+        Everything the drafts are allowed to assert about this person.
+
+        The PDF text plus any pasted posts, and nothing else. Deliberately does
+        not include the agents' own intermediate JSON: a claim invented by the
+        company intelligence agent would then count as its own evidence, which
+        is the exact failure this check exists to catch.
+        """
+        parts = [connection.profile_text or "", connection.posts_text or ""]
+        return "\n\n".join(p for p in parts if p.strip())
+
+    @staticmethod
+    def _is_better(new_report: dict, old_report: dict) -> bool:
+        """
+        Whether a correction pass actually improved grounding.
+
+        Compares unsupported claim counts rather than rates, because a rewrite
+        that drops most of its specifics can raise the rate while saying less;
+        fewer unsupported assertions is the thing actually wanted. A failed
+        recheck is never treated as an improvement.
+        """
+        if not new_report or not new_report.get("ok") or not new_report.get("summary"):
+            return False
+        if not old_report or not old_report.get("summary"):
+            return True
+        return new_report["summary"]["unsupported"] < old_report["summary"]["unsupported"]
+
     async def _interruptible_sleep(self, user_id: int, seconds: float):
         """
         Sleeps for the given duration but can be interrupted immediately
@@ -468,7 +603,23 @@ class QueueOrchestrator:
                             tone_examples=settings.get("tone_examples", ""),
                             sender_name=sender_name
                         )
-                        
+
+                        # Step C: grounding check and one correction pass.
+                        # Isolated inside _ground_and_correct so a failure here
+                        # can never reach the handler below -- see that method.
+                        variants, grounding_report = await self._ground_and_correct(
+                            worker_name=worker_name,
+                            api_key=current_key_record.key_value,
+                            connection=connection,
+                            variants=variants,
+                            bridge_data=bridge_data,
+                            twin_profile=twin_profile,
+                            tone_examples=settings.get("tone_examples", ""),
+                            sender_name=sender_name,
+                        )
+                        connection.grounding_report = j_dumps(grounding_report) if grounding_report else None
+
+
                         # Save successful outreach
                         connection.why_person = bridge_data["why_person"]
                         connection.bridge = bridge_data["bridge"]
