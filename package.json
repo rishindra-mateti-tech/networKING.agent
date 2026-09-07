@@ -1,0 +1,11 @@
+{
+  "name": "networking.agent-orchestrator",
+  "version": "1.0.0",
+  "description": "Unified runner for Next.js frontend and FastAPI backend",
+  "scripts": {
+    "dev": "python run.py"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

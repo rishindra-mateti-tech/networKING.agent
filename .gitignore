@@ -1,0 +1,40 @@
+# Python
+backend/.venv/
+backend/__pycache__/
+**/__pycache__/
+*.pyc
+
+# Secrets
+backend/.env
+.env
+
+# Database
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Uploads (user-generated content, not source)
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/npm-debug.log*
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local AI-assistant tooling config, not part of the app
+.claude/
+
+# Grounding evaluation output. Contains generated draft text and claims derived
+# from real people's profiles, so it stays local.
+backend/grounding_run.json
+backend/*_run.json
+.vercel
+.env*

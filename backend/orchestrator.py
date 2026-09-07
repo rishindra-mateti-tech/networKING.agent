@@ -1,0 +1,918 @@
+import asyncio
+import datetime
+import html
+import re
+import httpx
+from sqlalchemy.orm import Session
+
+import models
+from database import SessionLocal
+from twin_agent import compile_twin_agent_profile, get_sender_name
+from generator import analyze_candidate_bridge, generate_outreach_variants
+from grounding import VARIANT_KEYS, evaluate_drafts, regeneration_feedback
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    """
+    An on/off switch read from the environment at call time, not import time,
+    so quota can be reclaimed on a running deployment by setting a variable and
+    restarting, with no code change and no redeploy of a different build.
+    """
+    import os
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in ("0", "false", "no", "off")
+
+
+def j_dumps(value) -> str:
+    """json.dumps that can never take down a generation that already succeeded."""
+    import json
+    try:
+        return json.dumps(value)
+    except Exception:
+        return "{}"
+
+# Idle backoff bounds for a worker whose queue is empty. Uploading a profile or
+# pressing "Process Queue Now" wakes workers through the user trigger, so these
+# only govern how often an idle worker touches the database on its own.
+_IDLE_POLL_MIN_SECONDS = 5
+_IDLE_POLL_MAX_SECONDS = 300
+
+# How often the reconciliation loop runs. Key changes sync workers directly, so
+# this only has to catch expired cooldowns (three minutes) and crashed workers.
+_WORKER_SYNC_INTERVAL_SECONDS = 60
+
+
+class QueueOrchestrator:
+    _instance = None
+
+    def __new__(cls, *args, **kwargs):
+        if not cls._instance:
+            cls._instance = super(QueueOrchestrator, cls).__new__(cls, *args, **kwargs)
+            cls._instance.active_workers = {}  # user_id -> list of asyncio.Task
+            cls._instance.user_locks = {}      # user_id -> asyncio.Lock (to prevent race conditions in connection pulling)
+            cls._instance.user_triggers = {}   # user_id -> asyncio.Event (to wake workers immediately)
+            cls._instance.running = False
+        return cls._instance
+
+    def start(self):
+        """Starts the main orchestrator monitoring loop."""
+        if not self.running:
+            self.running = True
+            self.loop_task = asyncio.create_task(self._orchestrator_loop())
+            print("[ORCHESTRATOR] QueueOrchestrator started with periodic monitoring loop.")
+
+    def stop(self):
+        """Stops the orchestrator and cancels all active workers."""
+        self.running = False
+        if hasattr(self, 'loop_task') and self.loop_task:
+            self.loop_task.cancel()
+        for user_id, tasks in list(self.active_workers.items()):
+            for task in tasks:
+                task.cancel()
+        self.active_workers.clear()
+        print("[ORCHESTRATOR] QueueOrchestrator stopped and all workers cancelled.")
+
+    async def _orchestrator_loop(self):
+        """
+        Safety net that reconciles worker counts and clears expired API-key
+        cooldowns.
+
+        Not the primary path: adding, toggling or deleting a key syncs that
+        user's workers directly, and a worker looking for a key clears its own
+        expired cooldown. This used to run every ten seconds over every user in
+        the database, opening a separate session per user -- four queries and a
+        connection per user, permanently, whether or not anyone was signed in.
+        It now reuses one session, considers only users who could actually have
+        a worker, and runs a minute apart, which is well inside the three-minute
+        cooldown it exists to expire.
+        """
+        while self.running:
+            try:
+                db = SessionLocal()
+                try:
+                    with_keys = {
+                        row[0] for row in
+                        db.query(models.ApiKey.user_id)
+                          .filter(models.ApiKey.is_active == True)
+                          .distinct()
+                    }
+                    # Users with running workers are included even without an
+                    # active key, so those workers get torn down.
+                    for user_id in with_keys | set(self.active_workers.keys()):
+                        await self.sync_user_workers(user_id, db=db)
+                finally:
+                    db.close()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"[ORCHESTRATOR] Error in monitoring loop: {e}")
+            await asyncio.sleep(_WORKER_SYNC_INTERVAL_SECONDS)
+
+    def get_user_lock(self, user_id: int) -> asyncio.Lock:
+        """Retrieves or creates a thread-safe lock for connection selection for a given user."""
+        if user_id not in self.user_locks:
+            self.user_locks[user_id] = asyncio.Lock()
+        return self.user_locks[user_id]
+
+    def get_user_trigger(self, user_id: int) -> asyncio.Event:
+        """Retrieves or creates an asyncio.Event trigger for a given user to wake workers immediately."""
+        if user_id not in self.user_triggers:
+            self.user_triggers[user_id] = asyncio.Event()
+        return self.user_triggers[user_id]
+
+    def trigger_now(self, user_id: int):
+        """
+        Immediately wakes up all sleeping workers for a user by setting the trigger event.
+        Called when a new connection is added or user manually triggers processing.
+        """
+        trigger = self.get_user_trigger(user_id)
+        trigger.set()
+        print(f"[ORCHESTRATOR] Trigger fired for User {user_id} — workers waking up immediately.")
+
+    async def sync_user_workers(self, user_id: int, db: Session = None):
+        """
+        Dynamically adjusts the number of concurrent worker tasks for a user
+        to match the number of active primary API keys they have configured.
+
+        Pass `db` to reuse an open session; the reconciliation loop does this so
+        syncing many users costs one connection rather than one each.
+        """
+        if not self.running:
+            return
+
+        owns_session = db is None
+        db = db or SessionLocal()
+        try:
+            now = datetime.datetime.utcnow()
+            # Clear expired cooldowns
+            expired = db.query(models.ApiKey).filter(
+                models.ApiKey.user_id == user_id,
+                models.ApiKey.cooldown_until != None,
+                models.ApiKey.cooldown_until <= now
+            ).all()
+            if expired:
+                for k in expired:
+                    k.cooldown_until = None
+                db.commit()
+
+            # Fetch active primary API keys
+            active_keys = db.query(models.ApiKey).filter(
+                models.ApiKey.user_id == user_id,
+                models.ApiKey.is_active == True,
+                models.ApiKey.role == "primary",
+                (models.ApiKey.cooldown_until == None) | (models.ApiKey.cooldown_until < now)
+            ).all()
+
+            desired_worker_count = len(active_keys)
+            
+            # If no primary keys, see if we can use standby keys instead of stopping completely
+            if desired_worker_count == 0:
+                standby_keys = db.query(models.ApiKey).filter(
+                    models.ApiKey.user_id == user_id,
+                    models.ApiKey.is_active == True,
+                    models.ApiKey.role == "standby",
+                    (models.ApiKey.cooldown_until == None) | (models.ApiKey.cooldown_until < now)
+                ).all()
+                desired_worker_count = min(len(standby_keys), 1) # Run at least one standby worker
+
+            # If all configured keys are temporarily in cooldown, keep at least 1 worker polling
+            all_user_keys = db.query(models.ApiKey).filter(
+                models.ApiKey.user_id == user_id,
+                models.ApiKey.is_active == True
+            ).count()
+            if desired_worker_count == 0 and all_user_keys > 0:
+                desired_worker_count = 1
+
+            current_workers = self.active_workers.get(user_id, [])
+            current_worker_count = len(current_workers)
+
+            if current_worker_count < desired_worker_count:
+                # Spawn more workers
+                diff = desired_worker_count - current_worker_count
+                print(f"[ORCHESTRATOR] Spawning {diff} new workers for User {user_id}.")
+                if user_id not in self.active_workers:
+                    self.active_workers[user_id] = []
+                for idx in range(diff):
+                    worker_index = current_worker_count + idx
+                    task = asyncio.create_task(self._worker_loop(user_id, f"Worker_{worker_index}", worker_index))
+                    self.active_workers[user_id].append(task)
+            elif current_worker_count > desired_worker_count:
+                # Terminate excess workers
+                diff = current_worker_count - desired_worker_count
+                print(f"[ORCHESTRATOR] Terminating {diff} excess workers for User {user_id}.")
+                for _ in range(diff):
+                    task = self.active_workers[user_id].pop()
+                    task.cancel()
+        except Exception as e:
+            print(f"[ORCHESTRATOR] Error syncing workers for User {user_id}: {e}")
+        finally:
+            # Never close a session the caller lent us; it has more users to sync.
+            if owns_session:
+                db.close()
+
+    # Telegram rejects any single message over 4096 characters. A full outreach
+    # briefing (metrics plus five drafts) regularly lands around 4200, so it was
+    # being silently refused with a 400 and the user simply never got the alert.
+    TELEGRAM_LIMIT = 4096
+
+    @staticmethod
+    def _pack_blocks(blocks: list, limit: int) -> list:
+        """
+        Packs pre-formed blocks into as few messages as possible without ever
+        splitting inside a block. Blocks matter here because a draft is wrapped
+        in <code>...</code> that spans newlines, so cutting mid-block would
+        leave an unclosed tag and Telegram would reject the whole thing.
+        """
+        messages, current = [], ""
+        for block in blocks:
+            if not block:
+                continue
+
+            # A single oversized block still has to be broken up. Strip the HTML
+            # first so no tag can be left dangling, split on line boundaries, and
+            # hard-slice any line that is itself longer than the limit (a draft
+            # written as one long paragraph has no newline to split on).
+            if len(block) > limit:
+                if current:
+                    messages.append(current)
+                    current = ""
+                plain = re.sub(r"</?[a-zA-Z][^>]*>", "", block)
+                piece = ""
+                for line in plain.split("\n"):
+                    while len(line) > limit:
+                        if piece:
+                            messages.append(piece)
+                            piece = ""
+                        messages.append(line[:limit])
+                        line = line[limit:]
+                    if len(piece) + len(line) + 1 > limit:
+                        if piece:
+                            messages.append(piece)
+                        piece = line
+                    else:
+                        piece = f"{piece}\n{line}" if piece else line
+                if piece:
+                    current = piece
+                continue
+
+            if len(current) + len(block) + 2 > limit:
+                messages.append(current)
+                current = block
+            else:
+                current = f"{current}\n\n{block}" if current else block
+
+        if current:
+            messages.append(current)
+        # Telegram rejects an empty message, so never emit one
+        return [m for m in messages if m.strip()]
+
+    async def _send_telegram_alert(self, token: str, chat_id: str, text=None, blocks: list = None):
+        """
+        Dispatches a Telegram notification, splitting across several messages
+        when the content exceeds Telegram's per-message limit.
+        """
+        token = token.strip() if token else ""
+        chat_id = chat_id.strip() if chat_id else ""
+        if not token or not chat_id:
+            return
+
+        parts = self._pack_blocks(blocks if blocks is not None else [text or ""], self.TELEGRAM_LIMIT)
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+
+        try:
+            async with httpx.AsyncClient() as client:
+                for idx, part in enumerate(parts, start=1):
+                    res = await client.post(
+                        url,
+                        json={"chat_id": chat_id, "text": part, "parse_mode": "HTML"},
+                        timeout=10.0,
+                    )
+                    if res.status_code == 200:
+                        print(f"[ORCHESTRATOR] Telegram message {idx}/{len(parts)} sent to chat {chat_id}.")
+                    else:
+                        # Retry once without HTML, since an unbalanced tag is the
+                        # most common cause of a 400 here and a plain-text alert
+                        # beats no alert at all.
+                        print(f"[ORCHESTRATOR] Telegram API error ({res.status_code}) on part {idx}: {res.text}")
+                        plain = re.sub(r"</?[a-zA-Z][^>]*>", "", part)
+                        retry = await client.post(
+                            url, json={"chat_id": chat_id, "text": plain}, timeout=10.0
+                        )
+                        print(f"[ORCHESTRATOR] Plain-text retry for part {idx}: {retry.status_code}")
+        except Exception as e:
+            print(f"[ORCHESTRATOR] Failed to send Telegram alert: {e}")
+
+    async def _send_slack_alert(self, webhook_url: str, text: str):
+        """Dispatches an asynchronous Slack notification via an Incoming Webhook."""
+        webhook_url = webhook_url.strip() if webhook_url else ""
+        if not webhook_url:
+            return
+
+        payload = {"text": text}
+        try:
+            async with httpx.AsyncClient() as client:
+                res = await client.post(webhook_url, json=payload, timeout=10.0)
+                if res.status_code == 200:
+                    print(f"[ORCHESTRATOR] Slack notification sent successfully.")
+                else:
+                    print(f"[ORCHESTRATOR] Slack API error ({res.status_code}): {res.text}")
+        except Exception as e:
+            print(f"[ORCHESTRATOR] Failed to send Slack alert: {e}")
+
+    async def _ground_and_correct(
+        self, worker_name, api_key, connection, variants, bridge_data,
+        twin_profile, tone_examples, sender_name,
+    ):
+        """
+        Checks the drafts against their source and, if anything is unsupported,
+        rewrites once. Returns (variants, report); report is None when the check
+        did not run.
+
+        Nothing in here is allowed to raise. Generation has already succeeded by
+        this point at a cost of six model calls, and grounding is an improvement
+        on finished work. Left inline, a quota error during the correction pass
+        would reach the worker's failure handler, put the key on a three-minute
+        cooldown and re-run the whole pipeline -- throwing away good drafts and
+        spending another six calls to reproduce them. On a free tier that turns
+        one 429 into a spiral. The worst outcome here is the drafts standing
+        exactly as generated, unannotated.
+
+        Cost, per profile: +2 calls to check, +3 more only when a rewrite is
+        attempted. Both halves can be turned off independently by environment
+        variable when quota is tight, without touching code.
+        """
+        if not _env_flag("GROUNDING_ENABLED", True):
+            return variants, None
+
+        report = None
+        try:
+            report = await asyncio.to_thread(
+                evaluate_drafts,
+                api_key=api_key,
+                drafts={k: variants.get(k) for k in VARIANT_KEYS},
+                candidate_source=self._candidate_source(connection),
+                sender_source=twin_profile,
+                candidate_name=connection.name,
+                sender_name=sender_name,
+            )
+
+            if not _env_flag("GROUNDING_AUTOCORRECT", True):
+                return variants, report
+
+            feedback = regeneration_feedback(report)
+            if not feedback:
+                return variants, report
+
+            print(f"[WORKER] {worker_name} found {report['summary']['unsupported']} "
+                  f"unsupported claim(s) for {connection.name}; regenerating once.")
+            corrected = await asyncio.to_thread(
+                generate_outreach_variants,
+                api_key=api_key,
+                twin_profile=twin_profile,
+                candidate_name=connection.name,
+                candidate_profile=connection.profile_text or "",
+                candidate_posts=connection.posts_text or "",
+                bridge_data=bridge_data,
+                tone_examples=tone_examples,
+                sender_name=sender_name,
+                grounding_feedback=feedback,
+            )
+            recheck = await asyncio.to_thread(
+                evaluate_drafts,
+                api_key=api_key,
+                drafts={k: corrected.get(k) for k in VARIANT_KEYS},
+                candidate_source=self._candidate_source(connection),
+                sender_source=twin_profile,
+                candidate_name=connection.name,
+                sender_name=sender_name,
+            )
+            # Keep the rewrite only if it actually grounded better. A correction
+            # pass that made things worse is not an improvement just because it
+            # was asked for.
+            if self._is_better(recheck, report):
+                recheck["regenerated"] = True
+                recheck["previous_grounded_rate"] = report["summary"]["grounded_rate"]
+                return corrected, recheck
+            report["regenerated"] = False
+            report["regeneration_rejected"] = True
+            return variants, report
+
+        except Exception as e:
+            print(f"[WORKER] {worker_name} grounding step failed for {connection.name} "
+                  f"(non-fatal, drafts kept as generated): {e}")
+            return variants, report
+
+    @staticmethod
+    def _candidate_source(connection) -> str:
+        """
+        Everything the drafts are allowed to assert about this person.
+
+        The PDF text plus any pasted posts, and nothing else. Deliberately does
+        not include the agents' own intermediate JSON: a claim invented by the
+        company intelligence agent would then count as its own evidence, which
+        is the exact failure this check exists to catch.
+        """
+        parts = [connection.profile_text or "", connection.posts_text or ""]
+        return "\n\n".join(p for p in parts if p.strip())
+
+    @staticmethod
+    def _is_better(new_report: dict, old_report: dict) -> bool:
+        """
+        Whether a correction pass actually improved grounding.
+
+        Compares unsupported claim counts rather than rates, because a rewrite
+        that drops most of its specifics can raise the rate while saying less;
+        fewer unsupported assertions is the thing actually wanted. A failed
+        recheck is never treated as an improvement.
+        """
+        if not new_report or not new_report.get("ok") or not new_report.get("summary"):
+            return False
+        if not old_report or not old_report.get("summary"):
+            return True
+        return new_report["summary"]["unsupported"] < old_report["summary"]["unsupported"]
+
+    async def _interruptible_sleep(self, user_id: int, seconds: float):
+        """
+        Sleeps for the given duration but can be interrupted immediately
+        when the user's trigger event is set (e.g., new connection added
+        or manual 'Process Queue Now' clicked).
+        """
+        trigger = self.get_user_trigger(user_id)
+        # Deliberately not cleared before waiting. A trigger fired while this
+        # worker was busy generating would otherwise be thrown away here, and
+        # the worker would sleep out the full duration having already missed
+        # the signal. Clearing afterwards instead means a trigger raised at any
+        # moment is honoured by the next sleep, which is what makes a long idle
+        # backoff safe.
+        try:
+            await asyncio.wait_for(trigger.wait(), timeout=seconds)
+            print(f"[ORCHESTRATOR] Sleep interrupted by trigger for User {user_id}.")
+        except asyncio.TimeoutError:
+            # Normal timeout — sleep completed naturally
+            pass
+        finally:
+            trigger.clear()
+
+    async def _worker_loop(self, user_id: int, worker_name: str, worker_index: int = 0):
+        """
+        The execution loop for an individual WorkerThread.
+        Pulls connection queue items, processes using Gemini APIs, handles cooldown failover, and sends alerts.
+        """
+        print(f"[WORKER] {worker_name} started for User {user_id}.")
+        # How long to wait after finding nothing to do. Every worker used to
+        # re-open a database session and poll every five seconds forever, so an
+        # app with nobody using it still hammered the database around the clock
+        # -- enough on a free-tier Postgres to keep the instance from ever
+        # idling down. Uploading a profile or pressing "Process Queue Now"
+        # fires the trigger and wakes every worker immediately, so waiting
+        # longer between empty polls costs no responsiveness.
+        idle_seconds = _IDLE_POLL_MIN_SECONDS
+        while self.running:
+            db = SessionLocal()
+            connection = None
+            try:
+                # 1. Thread-safe lock to pull next pending connection
+                lock = self.get_user_lock(user_id)
+                async with lock:
+                    connection = db.query(models.Connection).filter(
+                        models.Connection.user_id == user_id,
+                        models.Connection.status == "pending"
+                    ).order_by(
+                        models.Connection.is_starred.desc(),
+                        models.Connection.created_at.asc()
+                    ).first()
+
+                    if connection:
+                        connection.status = "processing"
+                        connection.error_message = None
+                        db.commit()
+                        db.refresh(connection)
+
+                # If no pending connection, back off and try again. The delay
+                # doubles up to the cap while the queue stays empty and resets
+                # the moment there is work.
+                if not connection:
+                    await self._interruptible_sleep(user_id, idle_seconds)
+                    idle_seconds = min(idle_seconds * 2, _IDLE_POLL_MAX_SECONDS)
+                    continue
+                idle_seconds = _IDLE_POLL_MIN_SECONDS
+
+                print(f"[WORKER] {worker_name} picked connection: {connection.name} (Starred: {connection.is_starred})")
+
+                # 2. Get API key for this worker operation. Each worker prefers a distinct
+                # key (by its stable worker_index) so parallel workers actually spread load
+                # across the whole key pool instead of piling onto whichever key is oldest.
+                api_key_record = self._get_available_key(db, user_id, worker_index)
+                if not api_key_record:
+                    # Check if there are keys in cooldown vs no active keys configured
+                    has_active_keys = db.query(models.ApiKey).filter(
+                        models.ApiKey.user_id == user_id,
+                        models.ApiKey.is_active == True
+                    ).first()
+                    connection.status = "pending"
+                    if has_active_keys:
+                        connection.error_message = "API key temporarily in cooldown. Retrying shortly..."
+                    else:
+                        connection.error_message = "No available API keys (all are in cooldown/inactive)."
+                    db.commit()
+                    print(f"[WORKER] {worker_name} paused: No active API keys available for User {user_id}.")
+                    await self._interruptible_sleep(user_id, 15) # Cooldown wait
+                    continue
+
+                # 3. Retrieve settings context (TwinAgent profile, Telegram details, pacing)
+                settings_records = db.query(models.Setting).filter(models.Setting.user_id == user_id).all()
+                settings = {s.key: s.value for s in settings_records if s.value}
+
+                telegram_token = settings.get("telegram_token")
+                telegram_chat_id = settings.get("telegram_chat_id")
+                slack_webhook_url = settings.get("slack_webhook_url")
+
+                # A saved token/webhook stays saved even when disabled, so
+                # re-enabling later doesn't require re-entering it.
+                if settings.get("telegram_enabled", "true") == "false":
+                    telegram_token = None
+                    telegram_chat_id = None
+                if settings.get("slack_enabled", "true") == "false":
+                    slack_webhook_url = None
+
+                # Default pacing is 15 minutes, but user can change it
+                try:
+                    pacing_min = float(settings.get("pacing_interval_minutes", 15.0))
+                except ValueError:
+                    pacing_min = 15.0
+
+                twin_profile = compile_twin_agent_profile(db, user_id)
+                sender_name = get_sender_name(db, user_id)
+
+                # 4. Generate with Failover Pool Retry
+                success = False
+                attempts = 0
+                max_attempts = 3
+                current_key_record = api_key_record
+
+                while not success and attempts < max_attempts:
+                    attempts += 1
+                    try:
+                        print(f"[WORKER] {worker_name} executing Gemini call with key: {current_key_record.label or 'unlabeled'}")
+                                           # Step A: Bridge Analysis in non-blocking thread
+                        bridge_data = await asyncio.to_thread(
+                            analyze_candidate_bridge,
+                            api_key=current_key_record.key_value,
+                            twin_profile=twin_profile,
+                            candidate_name=connection.name,
+                            candidate_profile=connection.profile_text or "",
+                            candidate_posts=connection.posts_text or "",
+                            screenshot_path=connection.screenshot_path,
+                            posts_screenshot_path=connection.posts_screenshot_path,
+                            connection_count=connection.connection_count,
+                            hiring_badge_status=connection.hiring_badge_status,
+                            company_override=connection.company if connection.company_locked else None
+                        )
+
+                        # Backfill name/title/company from the AI's own extraction when the
+                        # PDF metadata heuristic (parser.py) failed to find them. Gemini reads
+                        # the same raw text with far more context than the regex heuristic,
+                        # so it often gets the name right even when the heuristic didn't.
+                        try:
+                            import json as j
+                            p_intel = j.loads(bridge_data.get("profile_intelligence") or "{}")
+
+                            ai_name = (p_intel.get("name") or "").strip()
+                            if ai_name and connection.name in (None, "", "Unknown Candidate"):
+                                connection.name = ai_name
+                            ai_title = (p_intel.get("title") or p_intel.get("role") or "").strip()
+                            if ai_title and not connection.current_title:
+                                connection.current_title = ai_title
+                            ai_company = (p_intel.get("company") or "").strip()
+                            if ai_company and not connection.company:
+                                connection.company = ai_company
+                        except Exception:
+                            pass
+
+                        # Step B: Variants Generation in non-blocking thread
+                        variants = await asyncio.to_thread(
+                            generate_outreach_variants,
+                            api_key=current_key_record.key_value,
+                            twin_profile=twin_profile,
+                            candidate_name=connection.name,
+                            candidate_profile=connection.profile_text or "",
+                            candidate_posts=connection.posts_text or "",
+                            bridge_data=bridge_data,
+                            tone_examples=settings.get("tone_examples", ""),
+                            sender_name=sender_name
+                        )
+
+                        # Step C: grounding check and one correction pass.
+                        # Isolated inside _ground_and_correct so a failure here
+                        # can never reach the handler below -- see that method.
+                        variants, grounding_report = await self._ground_and_correct(
+                            worker_name=worker_name,
+                            api_key=current_key_record.key_value,
+                            connection=connection,
+                            variants=variants,
+                            bridge_data=bridge_data,
+                            twin_profile=twin_profile,
+                            tone_examples=settings.get("tone_examples", ""),
+                            sender_name=sender_name,
+                        )
+                        connection.grounding_report = j_dumps(grounding_report) if grounding_report else None
+
+
+                        # Save successful outreach
+                        connection.why_person = bridge_data["why_person"]
+                        connection.bridge = bridge_data["bridge"]
+                        connection.best_angle = bridge_data["best_angle"]
+                        connection.profile_intelligence = bridge_data["profile_intelligence"]
+                        connection.company_intelligence = bridge_data["company_intelligence"]
+                        connection.relationship_strategy = bridge_data["relationship_strategy"]
+                        connection.personalization_data = bridge_data["personalization_data"]
+                        connection.context_summary = bridge_data["context_summary"]
+                        
+                        # Save new platform metrics. Tenure at the current company is
+                        # deterministically parsed from the PDF at upload time (parser.py);
+                        # only fall back to the AI's estimate when that parse found nothing.
+                        if connection.current_company_years_experience is None:
+                            connection.current_company_years_experience = bridge_data.get("current_company_years_experience")
+                        connection.networking_score = bridge_data["networking_score"]
+                        connection.reply_probability = bridge_data["reply_probability"]
+                        connection.hiring_probability_score = bridge_data["hiring_probability_score"]
+                        connection.is_decision_maker = bridge_data["is_decision_maker"]
+                        connection.referral_potential = bridge_data["referral_potential"]
+                        connection.networking_difficulty = bridge_data["networking_difficulty"]
+                        connection.conversation_starter = bridge_data["conversation_starter"]
+                        connection.avoid_points = bridge_data["avoid_points"]
+                        connection.best_message_type = bridge_data["best_message_type"]
+                        
+                        # Save variants
+                        connection.generated_outreach_short = variants["short"]
+                        connection.generated_outreach_warm = variants["warm"]
+                        connection.generated_outreach_tech = variants["tech"]
+                        connection.generated_outreach_mixed = variants["mixed"]
+                        
+                        connection.generated_outreach_referral = variants.get("referral")
+                        connection.generated_outreach_coffee = variants.get("coffee")
+                        connection.generated_outreach_technical = variants.get("technical")
+                        connection.generated_outreach_relationship = variants.get("relationship")
+                        connection.generated_outreach_featured = variants.get("featured")
+                        
+                        connection.status = "completed"
+                        db.commit()
+                        success = True
+                        print(f"[WORKER] {worker_name} successfully finished generation for {connection.name}.")
+                        
+                        # Build shared notification content (used by both Telegram and Slack).
+                        # Wrapped in its own try/except so a bug here (or a transient
+                        # Telegram/Slack error) can never fall through to the generation
+                        # failure handler below, which would wrongly cooldown a key that
+                        # actually succeeded and already committed connection.status = "completed".
+                        try:
+                            if (telegram_token and telegram_chat_id) or slack_webhook_url:
+                                import json as j
+
+                                try:
+                                    company_intel = j.loads(bridge_data.get("company_intelligence") or "{}")
+                                except Exception:
+                                    company_intel = {}
+
+                                raw_name = connection.name or "Candidate"
+                                raw_title = connection.current_title or "Software Professional"
+                                raw_company = connection.company or "Company"
+                                raw_company_class = company_intel.get("company_type") or "Startup"
+
+                                networking_score = f"{connection.networking_score or 5.0}"
+                                reply_probability = f"{int(connection.reply_probability or 50)}"
+
+                                hiring_val = connection.hiring_badge_status or company_intel.get("hiring_status") or connection.hiring_probability_score or "unknown"
+                                raw_hiring_probability = str(hiring_val).capitalize()
+
+                                raw_is_decision_maker = (connection.is_decision_maker or "no").capitalize()
+                                raw_referral_potential = (connection.referral_potential or "medium").capitalize()
+                                raw_networking_difficulty = (connection.networking_difficulty or "medium").replace('_', ' ').capitalize()
+
+                                raw_conversation_starter = connection.conversation_starter or "None"
+                                raw_avoid_points = connection.avoid_points or "None"
+                                raw_best_message_type = connection.best_message_type or "Technical curiosity"
+
+                                raw_referral = connection.generated_outreach_referral or ""
+                                raw_coffee = connection.generated_outreach_coffee or ""
+                                raw_technical = connection.generated_outreach_technical or ""
+                                raw_relationship = connection.generated_outreach_relationship or ""
+                                raw_featured = connection.generated_outreach_featured or ""
+
+                                # --- Telegram (HTML parse_mode) ---
+                                if telegram_token and telegram_chat_id:
+                                    safe_name = html.escape(raw_name)
+                                    safe_title = html.escape(raw_title)
+                                    safe_company = html.escape(raw_company)
+                                    company_class = html.escape(raw_company_class)
+                                    profile_url_block = ""
+                                    if connection.profile_url:
+                                        profile_url_block = f"🔗 <b>LinkedIn URL</b>: {html.escape(connection.profile_url)}\n"
+                                    email_block = f"📧 <b>Email</b>: {html.escape(connection.candidate_email) if connection.candidate_email else 'Not found'}\n"
+                                    hiring_probability = html.escape(raw_hiring_probability)
+                                    is_decision_maker = html.escape(raw_is_decision_maker)
+                                    referral_potential = html.escape(raw_referral_potential)
+                                    networking_difficulty = html.escape(raw_networking_difficulty)
+                                    conversation_starter = html.escape(raw_conversation_starter)
+                                    avoid_points = html.escape(raw_avoid_points)
+                                    best_message_type = html.escape(raw_best_message_type)
+                                    safe_referral = html.escape(raw_referral)
+                                    safe_coffee = html.escape(raw_coffee)
+                                    safe_technical = html.escape(raw_technical)
+                                    safe_relationship = html.escape(raw_relationship)
+                                    safe_featured = html.escape(raw_featured)
+
+                                    # Sent as discrete blocks rather than one string so
+                                    # the splitter can never cut inside a <code> draft
+                                    # and leave an unclosed tag.
+                                    telegram_blocks = [
+                                        (
+                                            f"✨ <b>Outreach Intelligence Ready for {safe_name}!</b>\n"
+                                            f"💼 <b>Role</b>: {safe_title} @ {safe_company}\n"
+                                            f"🏢 <b>Classification</b>: {company_class}\n"
+                                            f"{profile_url_block}"
+                                            f"{email_block}"
+                                            f"🌟 <b>Networking Score</b>: {networking_score}/10\n"
+                                            f"📈 <b>Reply Probability</b>: {reply_probability}%\n"
+                                            f"💼 <b>Hiring Probability</b>: {hiring_probability}\n"
+                                            f"🔑 <b>Decision Maker</b>: {is_decision_maker}\n"
+                                            f"🤝 <b>Referral Potential</b>: {referral_potential}\n"
+                                            f"🧗 <b>Networking Difficulty</b>: {networking_difficulty}\n\n"
+                                            f"💡 <b>Conversation Starter</b>: {conversation_starter}\n"
+                                            f"⚠️ <b>Avoid</b>: {avoid_points}\n"
+                                            f"🎯 <b>Best Message Type</b>: {best_message_type}"
+                                        ),
+                                    ]
+                                    for label, body in [
+                                        ("REFERRAL DRAFT", safe_referral),
+                                        ("COFFEE CHAT DRAFT", safe_coffee),
+                                        ("TECHNICAL DRAFT", safe_technical),
+                                        ("RELATIONSHIP BUILDING DRAFT", safe_relationship),
+                                        ("FEATURED DRAFT (no limit)", safe_featured),
+                                    ]:
+                                        if body:
+                                            telegram_blocks.append(f"📝 <b>{label}</b>\n<code>{body}</code>")
+                                    telegram_blocks.append("<i>Review, select &amp; copy from your networKING dashboard.</i>")
+
+                                    await self._send_telegram_alert(
+                                        telegram_token, telegram_chat_id, blocks=telegram_blocks
+                                    )
+
+                                # --- Slack (mrkdwn) ---
+                                if slack_webhook_url:
+                                    def _slack_escape(s: str) -> str:
+                                        return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+                                    profile_url_line = ""
+                                    if connection.profile_url:
+                                        profile_url_line = f"🔗 *LinkedIn URL*: {_slack_escape(connection.profile_url)}\n"
+                                    email_line = f"📧 *Email*: {_slack_escape(connection.candidate_email) if connection.candidate_email else 'Not found'}\n"
+
+                                    slack_text = (
+                                        f"✨ *Outreach Intelligence Ready for {_slack_escape(raw_name)}!*\n"
+                                        f"💼 *Role*: {_slack_escape(raw_title)} @ {_slack_escape(raw_company)}\n"
+                                        f"🏢 *Classification*: {_slack_escape(raw_company_class)}\n"
+                                        f"{profile_url_line}"
+                                        f"{email_line}\n"
+                                        f"🌟 *Networking Score*: {networking_score}/10\n"
+                                        f"📈 *Reply Probability*: {reply_probability}%\n"
+                                        f"💼 *Hiring Probability*: {_slack_escape(raw_hiring_probability)}\n"
+                                        f"🔑 *Decision Maker*: {_slack_escape(raw_is_decision_maker)}\n"
+                                        f"🤝 *Referral Potential*: {_slack_escape(raw_referral_potential)}\n"
+                                        f"🧗 *Networking Difficulty*: {_slack_escape(raw_networking_difficulty)}\n\n"
+                                        f"💡 *Conversation Starter*: {_slack_escape(raw_conversation_starter)}\n"
+                                        f"⚠️ *Avoid*: {_slack_escape(raw_avoid_points)}\n"
+                                        f"🎯 *Best Message Type*: {_slack_escape(raw_best_message_type)}\n\n"
+                                        f"----------------------------\n"
+                                        f"📝 *REFERRAL DRAFT*\n```{_slack_escape(raw_referral)}```\n"
+                                        f"----------------------------\n"
+                                        f"📝 *COFFEE CHAT DRAFT*\n```{_slack_escape(raw_coffee)}```\n"
+                                        f"----------------------------\n"
+                                        f"📝 *TECHNICAL DRAFT*\n```{_slack_escape(raw_technical)}```\n"
+                                        f"----------------------------\n"
+                                        f"📝 *RELATIONSHIP BUILDING DRAFT*\n```{_slack_escape(raw_relationship)}```\n"
+                                        f"----------------------------\n"
+                                        f"📝 *FEATURED OUTREACH DRAFT (No Limit)*\n```{_slack_escape(raw_featured)}```\n"
+                                        f"----------------------------\n"
+                                        f"_Review, select & copy from your networKING dashboard._"
+                                    )
+                                    await self._send_slack_alert(slack_webhook_url, slack_text)
+                        except Exception as notify_err:
+                            # Notification failures must never be treated as a generation/key
+                            # failure: the connection already succeeded and was committed above.
+                            print(f"[WORKER] {worker_name} notification build/send failed (non-fatal): {notify_err}")
+
+                    except Exception as e:
+                        # Catch quota/rate limit error (typically 429) or invalid keys
+                        error_str = str(e).lower()
+                        print(f"[WORKER] {worker_name} failed attempt {attempts} with key error: {e}")
+                        
+                        # Cooldown the failing key for 3 minutes
+                        current_key_record.cooldown_until = datetime.datetime.utcnow() + datetime.timedelta(minutes=3)
+                        db.commit()
+                        
+                        if telegram_token and telegram_chat_id:
+                            alert_msg = f"⚠️ <b>Key Cooldown alert:</b> API key '{current_key_record.label}' encountered an error and was placed in cooldown for 3 minutes."
+                            await self._send_telegram_alert(telegram_token, telegram_chat_id, alert_msg)
+                        if slack_webhook_url:
+                            await self._send_slack_alert(slack_webhook_url, f"⚠️ *Key Cooldown alert:* API key '{current_key_record.label}' encountered an error and was placed in cooldown for 3 minutes.")
+
+                        # Attempt to failover to a standby key
+                        fallback_key = self._get_backup_key(db, user_id)
+                        if fallback_key:
+                            print(f"[WORKER] {worker_name} hot-swapping to standby key: {fallback_key.label or 'unlabeled'}")
+                            current_key_record = fallback_key
+                            if telegram_token and telegram_chat_id:
+                                alert_msg = f"🔄 <b>Failover active:</b> Swapped to standby key '{fallback_key.label}'."
+                                await self._send_telegram_alert(telegram_token, telegram_chat_id, alert_msg)
+                            if slack_webhook_url:
+                                await self._send_slack_alert(slack_webhook_url, f"🔄 *Failover active:* Swapped to standby key '{fallback_key.label}'.")
+                        else:
+                            # No standby key found, exit attempt loop
+                            break
+
+                if not success:
+                    # Final fallback: return connection to pending status
+                    connection.status = "pending"
+                    connection.error_message = "Failed to generate outreach after failover attempts."
+                    db.commit()
+                    print(f"[WORKER] {worker_name} failed to process connection: {connection.name}. Returned to queue.")
+                    await self._interruptible_sleep(user_id, 10)
+                    continue
+
+                # 5. Pacing: check if more connections are pending to proceed immediately, otherwise sleep
+                has_more_pending = db.query(models.Connection).filter(
+                    models.Connection.user_id == user_id,
+                    models.Connection.status == "pending"
+                ).first() is not None
+
+                if has_more_pending:
+                    print(f"[WORKER] {worker_name} completed outreach task. More pending items in queue. Proceeding in 2 seconds.")
+                    await self._interruptible_sleep(user_id, 2)
+                else:
+                    print(f"[WORKER] {worker_name} completed outreach task. Queue is empty. Pacing sleep of {pacing_min} minutes started.")
+                    await self._interruptible_sleep(user_id, pacing_min * 60)
+
+
+            except asyncio.CancelledError:
+                print(f"[WORKER] {worker_name} task cancelled.")
+                break
+            except Exception as e:
+                print(f"[WORKER] {worker_name} general error: {e}")
+                if connection:
+                    try:
+                        connection.status = "pending"
+                        connection.error_message = f"Worker runtime exception: {str(e)}"
+                        db.commit()
+                    except Exception:
+                        pass
+                await self._interruptible_sleep(user_id, 10)
+            finally:
+                db.close()
+
+    def _get_available_key(self, db: Session, user_id: int, worker_index: int = 0) -> models.ApiKey:
+        """
+        Pulls an active, non-cooldown primary key, preferring the key at `worker_index`
+        in the ordered pool so each concurrent worker sticks to its own key rather than
+        every worker competing for whichever key is oldest. Falls back to any other
+        available primary key (mod-wrapped), then to standby keys, if its preferred key
+        is missing or in cooldown.
+        """
+        now = datetime.datetime.utcnow()
+        expired = db.query(models.ApiKey).filter(
+            models.ApiKey.user_id == user_id,
+            models.ApiKey.cooldown_until != None,
+            models.ApiKey.cooldown_until <= now
+        ).all()
+        if expired:
+            for k in expired:
+                k.cooldown_until = None
+            db.commit()
+
+        available_primary_keys = db.query(models.ApiKey).filter(
+            models.ApiKey.user_id == user_id,
+            models.ApiKey.is_active == True,
+            models.ApiKey.role == "primary",
+            (models.ApiKey.cooldown_until == None) | (models.ApiKey.cooldown_until < now)
+        ).order_by(models.ApiKey.created_at.asc()).all()
+
+        key = None
+        if available_primary_keys:
+            key = available_primary_keys[worker_index % len(available_primary_keys)]
+
+        # If no primary keys are available, fallback to an active standby key
+        if not key:
+            key = self._get_backup_key(db, user_id)
+        return key
+
+    def _get_backup_key(self, db: Session, user_id: int) -> models.ApiKey:
+        """Pulls an active, non-cooldown standby (failover) key."""
+        now = datetime.datetime.utcnow()
+        return db.query(models.ApiKey).filter(
+            models.ApiKey.user_id == user_id,
+            models.ApiKey.is_active == True,
+            models.ApiKey.role == "standby",
+            (models.ApiKey.cooldown_until == None) | (models.ApiKey.cooldown_until < now)
+        ).order_by(models.ApiKey.created_at.asc()).first()
